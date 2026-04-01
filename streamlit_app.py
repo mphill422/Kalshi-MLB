@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 1.5 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 1.6 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -13,55 +13,75 @@ KELLY_FRACTION = 0.5
 MAX_BET_PCT = 0.05
 LEAGUE_AVG_ERA = 4.20
 
-def get_team_runs_per_game(team_id):
-    try:
-        stats = statsapi.team_stats(team_id, group='hitting', type='season')
-        runs = None
-        games = None
-        for line in stats.split('\n'):
-            if 'runs' in line.lower():
-                parts = line.split()
-                for p in parts:
-                    try:
-                        runs = float(p)
-                        break
-                    except:
-                        pass
-            if 'gamesplayed' in line.lower() or 'games played' in line.lower():
-                parts = line.split()
-                for p in parts:
-                    try:
-                        games = float(p)
-                        break
-                    except:
-                        pass
-        if runs and games and games > 0:
-            return round(runs / games, 2)
-    except:
-        pass
-    return 4.5
+TEAM_RUNS_2025 = {
+    "New York Yankees": 4.8,
+    "Los Angeles Dodgers": 5.1,
+    "Atlanta Braves": 5.2,
+    "Houston Astros": 4.6,
+    "Philadelphia Phillies": 4.9,
+    "Baltimore Orioles": 4.7,
+    "Minnesota Twins": 4.5,
+    "Texas Rangers": 4.4,
+    "Seattle Mariners": 4.3,
+    "Boston Red Sox": 4.6,
+    "San Diego Padres": 4.4,
+    "Cleveland Guardians": 4.3,
+    "Milwaukee Brewers": 4.2,
+    "Chicago Cubs": 4.4,
+    "San Francisco Giants": 4.1,
+    "Detroit Tigers": 4.2,
+    "Kansas City Royals": 4.3,
+    "Pittsburgh Pirates": 4.0,
+    "Toronto Blue Jays": 4.5,
+    "New York Mets": 4.6,
+    "St. Louis Cardinals": 4.2,
+    "Arizona Diamondbacks": 4.7,
+    "Tampa Bay Rays": 4.3,
+    "Cincinnati Reds": 4.4,
+    "Washington Nationals": 3.9,
+    "Colorado Rockies": 4.5,
+    "Oakland Athletics": 3.8,
+    "Athletics": 3.8,
+    "Miami Marlins": 3.7,
+    "Chicago White Sox": 3.6,
+    "Los Angeles Angels": 3.9,
+}
+
+PITCHER_ERA_2025 = {
+    "Chris Sale": 3.10,
+    "Paul Skenes": 2.10,
+    "Zack Wheeler": 3.00,
+    "Gerrit Cole": 3.40,
+    "Spencer Strider": 3.20,
+    "Luis Castillo": 3.50,
+    "Dylan Cease": 3.30,
+    "Corbin Burnes": 3.20,
+    "Max Fried": 3.10,
+    "Shane Bieber": 3.60,
+    "Kevin Gausman": 3.40,
+    "Logan Webb": 3.20,
+    "Sandy Alcantara": 3.50,
+    "Freddy Peralta": 3.40,
+    "Yu Darvish": 3.80,
+    "Luis Severino": 4.20,
+    "Andrew Abbott": 4.00,
+    "Cade Cavalli": 4.50,
+    "Trevor Rogers": 4.30,
+    "Cristopher Sanchez": 4.10,
+}
+
+def get_team_rpg(team_name):
+    for key in TEAM_RUNS_2025:
+        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
+            return TEAM_RUNS_2025[key]
+    return 4.2
 
 def get_pitcher_era(pitcher_name):
-    try:
-        if not pitcher_name or pitcher_name == 'TBD':
-            return LEAGUE_AVG_ERA
-        results = statsapi.lookup_player(pitcher_name)
-        if not results or len(results) == 0:
-            return LEAGUE_AVG_ERA
-        pid = results[0]['id']
-        stats = statsapi.player_stat_data(pid, group='pitching', type='season')
-        if not stats or 'stats' not in stats:
-            return LEAGUE_AVG_ERA
-        for s in stats['stats']:
-            splits = s.get('splits', [])
-            if not splits:
-                continue
-            for split in splits:
-                era = split.get('stat', {}).get('era', None)
-                if era and era != '-.--':
-                    return float(era)
-    except:
-        pass
+    if not pitcher_name or pitcher_name == 'TBD':
+        return LEAGUE_AVG_ERA
+    for key in PITCHER_ERA_2025:
+        if key.lower() in pitcher_name.lower() or pitcher_name.lower() in key.lower():
+            return PITCHER_ERA_2025[key]
     return LEAGUE_AVG_ERA
 
 def era_adjustment(pitcher_era):
@@ -85,8 +105,6 @@ try:
             try:
                 home = game['home_name']
                 away = game['away_name']
-                home_id = game['home_id']
-                away_id = game['away_id']
                 home_pitcher = game.get('home_probable_pitcher', 'TBD')
                 away_pitcher = game.get('away_probable_pitcher', 'TBD')
                 game_time = game['game_datetime']
@@ -104,9 +122,9 @@ try:
                         st.markdown("**Home:** " + home)
                         st.caption("SP: " + home_pitcher)
 
-                    away_rpg = get_team_runs_per_game(away_id)
-                    home_rpg = get_team_runs_per_game(home_id)
-                    base_total = away_rpg + home_rpg
+                    away_rpg = get_team_rpg(away)
+                    home_rpg = get_team_rpg(home)
+                    base_total = round(away_rpg + home_rpg, 1)
 
                     away_era = get_pitcher_era(away_pitcher)
                     home_era = get_pitcher_era(home_pitcher)
@@ -119,7 +137,7 @@ try:
                     st.markdown("---")
                     col3, col4, col5 = st.columns(3)
                     with col3:
-                        st.metric("Base Total", round(base_total, 1))
+                        st.metric("Base Total", base_total)
                     with col4:
                         st.metric("Away ERA", away_era)
                     with col5:
