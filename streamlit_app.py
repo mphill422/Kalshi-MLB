@@ -5,12 +5,13 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 1.3 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 1.4 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
 KELLY_FRACTION = 0.5
 MAX_BET_PCT = 0.05
+LEAGUE_AVG_ERA = 4.20
 
 def get_team_runs_per_game(team_id):
     try:
@@ -39,6 +40,28 @@ def get_team_runs_per_game(team_id):
     except:
         pass
     return 4.5
+
+def get_pitcher_era(pitcher_name):
+    try:
+        if not pitcher_name or pitcher_name == 'TBD':
+            return LEAGUE_AVG_ERA
+        results = statsapi.lookup_player(pitcher_name)
+        if not results:
+            return LEAGUE_AVG_ERA
+        pid = results[0]['id']
+        stats = statsapi.player_stat_data(pid, group='pitching', type='season')
+        for s in stats['stats']:
+            for split in s.get('splits', []):
+                era = split['stat'].get('era', None)
+                if era:
+                    return float(era)
+    except:
+        pass
+    return LEAGUE_AVG_ERA
+
+def era_adjustment(pitcher_era):
+    diff = pitcher_era - LEAGUE_AVG_ERA
+    return round(diff * 0.5, 2)
 
 def calc_kelly(edge):
     kelly = (edge / 1.0) * KELLY_FRACTION
@@ -77,9 +100,27 @@ try:
 
                 away_rpg = get_team_runs_per_game(away_id)
                 home_rpg = get_team_runs_per_game(home_id)
-                model_total = round(away_rpg + home_rpg, 1)
+                base_total = away_rpg + home_rpg
+
+                away_era = get_pitcher_era(away_pitcher)
+                home_era = get_pitcher_era(home_pitcher)
+
+                away_adj = era_adjustment(away_era)
+                home_adj = era_adjustment(home_era)
+
+                model_total = round(base_total + away_adj + home_adj, 1)
 
                 st.markdown("---")
+                col3, col4, col5 = st.columns(3)
+                with col3:
+                    st.metric("Base Run Total", round(base_total, 1))
+                with col4:
+                    era_label = away_pitcher.split()[-1] + " ERA: " + str(away_era) if away_pitcher != 'TBD' else "Away ERA"
+                    st.metric(era_label, away_era)
+                with col5:
+                    era_label2 = home_pitcher.split()[-1] + " ERA: " + str(home_era) if home_pitcher != 'TBD' else "Home ERA"
+                    st.metric(era_label2, home_era)
+
                 st.metric("Model Run Total Estimate", model_total)
 
                 kalshi_line = st.number_input("Enter Kalshi Line", min_value=0.0, max_value=20.0, value=8.5, step=0.5, key="line_" + game_id)
