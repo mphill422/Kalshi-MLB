@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 1.4 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 1.5 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -46,14 +46,19 @@ def get_pitcher_era(pitcher_name):
         if not pitcher_name or pitcher_name == 'TBD':
             return LEAGUE_AVG_ERA
         results = statsapi.lookup_player(pitcher_name)
-        if not results:
+        if not results or len(results) == 0:
             return LEAGUE_AVG_ERA
         pid = results[0]['id']
         stats = statsapi.player_stat_data(pid, group='pitching', type='season')
+        if not stats or 'stats' not in stats:
+            return LEAGUE_AVG_ERA
         for s in stats['stats']:
-            for split in s.get('splits', []):
-                era = split['stat'].get('era', None)
-                if era:
+            splits = s.get('splits', [])
+            if not splits:
+                continue
+            for split in splits:
+                era = split.get('stat', {}).get('era', None)
+                if era and era != '-.--':
                     return float(era)
     except:
         pass
@@ -77,68 +82,71 @@ try:
         st.warning("No games scheduled today.")
     else:
         for game in schedule:
-            home = game['home_name']
-            away = game['away_name']
-            home_id = game['home_id']
-            away_id = game['away_id']
-            home_pitcher = game.get('home_probable_pitcher', 'TBD')
-            away_pitcher = game.get('away_probable_pitcher', 'TBD')
-            game_time = game['game_datetime']
-            utc = datetime.strptime(game_time, '%Y-%m-%dT%H:%M:%SZ')
-            et = utc - timedelta(hours=4)
-            time_str = et.strftime('%I:%M %p ET')
-            game_id = str(game['game_id'])
+            try:
+                home = game['home_name']
+                away = game['away_name']
+                home_id = game['home_id']
+                away_id = game['away_id']
+                home_pitcher = game.get('home_probable_pitcher', 'TBD')
+                away_pitcher = game.get('away_probable_pitcher', 'TBD')
+                game_time = game['game_datetime']
+                utc = datetime.strptime(game_time, '%Y-%m-%dT%H:%M:%SZ')
+                et = utc - timedelta(hours=4)
+                time_str = et.strftime('%I:%M %p ET')
+                game_id = str(game['game_id'])
 
-            with st.expander("**" + away + " @ " + home + "** - " + time_str):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**Away:** " + away)
-                    st.caption("SP: " + away_pitcher)
-                with col2:
-                    st.markdown("**Home:** " + home)
-                    st.caption("SP: " + home_pitcher)
+                with st.expander("**" + away + " @ " + home + "** - " + time_str):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**Away:** " + away)
+                        st.caption("SP: " + away_pitcher)
+                    with col2:
+                        st.markdown("**Home:** " + home)
+                        st.caption("SP: " + home_pitcher)
 
-                away_rpg = get_team_runs_per_game(away_id)
-                home_rpg = get_team_runs_per_game(home_id)
-                base_total = away_rpg + home_rpg
+                    away_rpg = get_team_runs_per_game(away_id)
+                    home_rpg = get_team_runs_per_game(home_id)
+                    base_total = away_rpg + home_rpg
 
-                away_era = get_pitcher_era(away_pitcher)
-                home_era = get_pitcher_era(home_pitcher)
+                    away_era = get_pitcher_era(away_pitcher)
+                    home_era = get_pitcher_era(home_pitcher)
 
-                away_adj = era_adjustment(away_era)
-                home_adj = era_adjustment(home_era)
+                    away_adj = era_adjustment(away_era)
+                    home_adj = era_adjustment(home_era)
 
-                model_total = round(base_total + away_adj + home_adj, 1)
+                    model_total = round(base_total + away_adj + home_adj, 1)
 
-                st.markdown("---")
-                col3, col4, col5 = st.columns(3)
-                with col3:
-                    st.metric("Base Run Total", round(base_total, 1))
-                with col4:
-                    era_label = away_pitcher.split()[-1] + " ERA: " + str(away_era) if away_pitcher != 'TBD' else "Away ERA"
-                    st.metric(era_label, away_era)
-                with col5:
-                    era_label2 = home_pitcher.split()[-1] + " ERA: " + str(home_era) if home_pitcher != 'TBD' else "Home ERA"
-                    st.metric(era_label2, home_era)
+                    st.markdown("---")
+                    col3, col4, col5 = st.columns(3)
+                    with col3:
+                        st.metric("Base Total", round(base_total, 1))
+                    with col4:
+                        st.metric("Away ERA", away_era)
+                    with col5:
+                        st.metric("Home ERA", home_era)
 
-                st.metric("Model Run Total Estimate", model_total)
+                    st.metric("Model Run Total Estimate", model_total)
 
-                kalshi_line = st.number_input("Enter Kalshi Line", min_value=0.0, max_value=20.0, value=8.5, step=0.5, key="line_" + game_id)
-                kalshi_over_price = st.number_input("Kalshi Over Price (cents)", min_value=1, max_value=99, value=50, step=1, key="price_" + game_id)
-                your_prob = st.slider("Your Over Probability %", 0, 100, 50, key="prob_" + game_id)
+                    kalshi_line = st.number_input("Enter Kalshi Line", min_value=0.0, max_value=20.0, value=8.5, step=0.5, key="line_" + game_id)
+                    kalshi_over_price = st.number_input("Kalshi Over Price (cents)", min_value=1, max_value=99, value=50, step=1, key="price_" + game_id)
+                    your_prob = st.slider("Your Over Probability %", 0, 100, 50, key="prob_" + game_id)
 
-                kalshi_implied = kalshi_over_price / 100
-                your_implied = your_prob / 100
-                edge = your_implied - kalshi_implied
+                    kalshi_implied = kalshi_over_price / 100
+                    your_implied = your_prob / 100
+                    edge = your_implied - kalshi_implied
 
-                if edge >= EDGE_THRESHOLD:
-                    bet_pct, bet_amt = calc_kelly(edge)
-                    st.success("BET OVER - Edge: " + str(round(edge*100,1)) + "% | Bet: $" + str(bet_amt))
-                elif edge <= -EDGE_THRESHOLD:
-                    bet_pct, bet_amt = calc_kelly(abs(edge))
-                    st.success("BET UNDER - Edge: " + str(round(abs(edge)*100,1)) + "% | Bet: $" + str(bet_amt))
-                else:
-                    st.info("No edge. Current edge: " + str(round(edge*100,1)) + "%")
+                    if edge >= EDGE_THRESHOLD:
+                        bet_pct, bet_amt = calc_kelly(edge)
+                        st.success("BET OVER - Edge: " + str(round(edge*100,1)) + "% | Bet: $" + str(bet_amt))
+                    elif edge <= -EDGE_THRESHOLD:
+                        bet_pct, bet_amt = calc_kelly(abs(edge))
+                        st.success("BET UNDER - Edge: " + str(round(abs(edge)*100,1)) + "% | Bet: $" + str(bet_amt))
+                    else:
+                        st.info("No edge. Current edge: " + str(round(edge*100,1)) + "%")
+
+            except Exception as game_error:
+                st.warning("Could not load game: " + str(game_error))
+                continue
 
 except Exception as e:
     st.error("Error: " + str(e))
