@@ -1,3 +1,4 @@
 streamlit
 mlb-statsapi
 pandas
+supabase
