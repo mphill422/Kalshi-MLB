@@ -2,16 +2,26 @@ import streamlit as st
 import statsapi
 import pandas as pd
 from datetime import datetime, timedelta
+from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 1.8 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 1.9 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
 KELLY_FRACTION = 0.5
 MAX_BET_PCT = 0.05
 LEAGUE_AVG_ERA = 4.20
+
+try:
+    supabase = create_client(
+        st.secrets["supabase"]["url"],
+        st.secrets["supabase"]["key"]
+    )
+    supabase_connected = True
+except:
+    supabase_connected = False
 
 TEAM_RUNS_2025 = {
     "New York Yankees": 4.8,
@@ -123,87 +133,143 @@ def model_to_probability(model_total, kalshi_line):
     prob = max(20, min(80, prob))
     return int(round(prob))
 
-try:
-    today = datetime.today().strftime('%Y-%m-%d')
-    schedule = statsapi.schedule(date=today)
+def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total, kalshi_line, kalshi_over_price, model_prob, your_prob, edge, direction, bet_amt):
+    try:
+        supabase.table("mlb_settlements").insert({
+            "game_date": game_date,
+            "away_team": away,
+            "home_team": home,
+            "away_pitcher": away_pitcher,
+            "home_pitcher": home_pitcher,
+            "model_total": model_total,
+            "kalshi_line": kalshi_line,
+            "kalshi_over_price": kalshi_over_price,
+            "model_prob": model_prob,
+            "your_prob": your_prob,
+            "edge": round(edge, 4),
+            "bet_direction": direction,
+            "bet_amount": bet_amt
+        }).execute()
+        return True
+    except Exception as e:
+        st.error("Save error: " + str(e))
+        return False
 
-    if not schedule:
-        st.warning("No games scheduled today.")
+tab1, tab2 = st.tabs(["Today's Games", "Settlement Tracker"])
+
+with tab1:
+    try:
+        today = datetime.today().strftime('%Y-%m-%d')
+        schedule = statsapi.schedule(date=today)
+
+        if not schedule:
+            st.warning("No games scheduled today.")
+        else:
+            for game in schedule:
+                try:
+                    home = game['home_name']
+                    away = game['away_name']
+                    home_pitcher = game.get('home_probable_pitcher', 'TBD')
+                    away_pitcher = game.get('away_probable_pitcher', 'TBD')
+                    game_time = game['game_datetime']
+                    utc = datetime.strptime(game_time, '%Y-%m-%dT%H:%M:%SZ')
+                    et = utc - timedelta(hours=4)
+                    time_str = et.strftime('%I:%M %p ET')
+                    game_id = str(game['game_id'])
+
+                    with st.expander("**" + away + " @ " + home + "** - " + time_str):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown("**Away:** " + away)
+                            st.caption("SP: " + away_pitcher)
+                        with col2:
+                            st.markdown("**Home:** " + home)
+                            st.caption("SP: " + home_pitcher)
+
+                        away_rpg = get_team_rpg(away)
+                        home_rpg = get_team_rpg(home)
+                        base_total = round(away_rpg + home_rpg, 1)
+
+                        away_era = get_pitcher_era(away_pitcher)
+                        home_era = get_pitcher_era(home_pitcher)
+
+                        away_adj = era_adjustment(away_era)
+                        home_adj = era_adjustment(home_era)
+
+                        model_total = round(base_total + away_adj + home_adj, 1)
+
+                        st.markdown("---")
+                        col3, col4, col5 = st.columns(3)
+                        with col3:
+                            st.metric("Base Total", base_total)
+                        with col4:
+                            st.metric("Away ERA", away_era)
+                        with col5:
+                            st.metric("Home ERA", home_era)
+
+                        st.metric("Model Run Total Estimate", model_total)
+
+                        kalshi_line = st.number_input("Enter Kalshi Line", min_value=0.0, max_value=20.0, value=8.5, step=0.5, key="line_" + game_id)
+
+                        auto_prob = model_to_probability(model_total, kalshi_line)
+
+                        if model_total > kalshi_line:
+                            st.info("Model leans OVER - suggested probability: " + str(auto_prob) + "%")
+                        elif model_total < kalshi_line:
+                            st.info("Model leans UNDER - suggested probability: " + str(auto_prob) + "%")
+                        else:
+                            st.info("Model is neutral on this game.")
+
+                        kalshi_over_price = st.number_input("Kalshi Over Price (cents)", min_value=1, max_value=99, value=50, step=1, key="price_" + game_id)
+                        your_prob = st.slider("Your Over Probability %", 0, 100, auto_prob, key="prob_" + game_id)
+
+                        kalshi_implied = kalshi_over_price / 100
+                        your_implied = your_prob / 100
+                        edge = your_implied - kalshi_implied
+
+                        if edge >= EDGE_THRESHOLD:
+                            bet_pct, bet_amt = calc_kelly(edge)
+                            st.success("BET OVER - Edge: " + str(round(edge*100,1)) + "% | Bet: $" + str(bet_amt))
+                            if supabase_connected:
+                                if st.button("Log This Bet", key="log_" + game_id):
+                                    if save_bet(today, away, home, away_pitcher, home_pitcher, model_total, kalshi_line, kalshi_over_price, auto_prob, your_prob, edge, "OVER", bet_amt):
+                                        st.success("Bet logged!")
+                        elif edge <= -EDGE_THRESHOLD:
+                            bet_pct, bet_amt = calc_kelly(abs(edge))
+                            st.success("BET UNDER - Edge: " + str(round(abs(edge)*100,1)) + "% | Bet: $" + str(bet_amt))
+                            if supabase_connected:
+                                if st.button("Log This Bet", key="log_" + game_id):
+                                    if save_bet(today, away, home, away_pitcher, home_pitcher, model_total, kalshi_line, kalshi_over_price, auto_prob, your_prob, edge, "UNDER", bet_amt):
+                                        st.success("Bet logged!")
+                        else:
+                            st.info("No edge. Current edge: " + str(round(edge*100,1)) + "%")
+
+                except Exception as game_error:
+                    st.warning("Could not load game: " + str(game_error))
+                    continue
+
+    except Exception as e:
+        st.error("Error: " + str(e))
+
+with tab2:
+    st.subheader("Settlement Tracker")
+    if supabase_connected:
+        try:
+            data = supabase.table("mlb_settlements").select("*").order("game_date", desc=True).execute()
+            if data.data:
+                df = pd.DataFrame(data.data)
+                st.dataframe(df[["game_date", "away_team", "home_team", "model_total", "kalshi_line", "bet_direction", "bet_amount", "actual_total", "result", "profit_loss"]])
+            else:
+                st.info("No bets logged yet.")
+        except Exception as e:
+            st.error("Error loading settlements: " + str(e))
     else:
-        for game in schedule:
-            try:
-                home = game['home_name']
-                away = game['away_name']
-                home_pitcher = game.get('home_probable_pitcher', 'TBD')
-                away_pitcher = game.get('away_probable_pitcher', 'TBD')
-                game_time = game['game_datetime']
-                utc = datetime.strptime(game_time, '%Y-%m-%dT%H:%M:%SZ')
-                et = utc - timedelta(hours=4)
-                time_str = et.strftime('%I:%M %p ET')
-                game_id = str(game['game_id'])
+        st.warning("Supabase not connected.")
+```
 
-                with st.expander("**" + away + " @ " + home + "** - " + time_str):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**Away:** " + away)
-                        st.caption("SP: " + away_pitcher)
-                    with col2:
-                        st.markdown("**Home:** " + home)
-                        st.caption("SP: " + home_pitcher)
-
-                    away_rpg = get_team_rpg(away)
-                    home_rpg = get_team_rpg(home)
-                    base_total = round(away_rpg + home_rpg, 1)
-
-                    away_era = get_pitcher_era(away_pitcher)
-                    home_era = get_pitcher_era(home_pitcher)
-
-                    away_adj = era_adjustment(away_era)
-                    home_adj = era_adjustment(home_era)
-
-                    model_total = round(base_total + away_adj + home_adj, 1)
-
-                    st.markdown("---")
-                    col3, col4, col5 = st.columns(3)
-                    with col3:
-                        st.metric("Base Total", base_total)
-                    with col4:
-                        st.metric("Away ERA", away_era)
-                    with col5:
-                        st.metric("Home ERA", home_era)
-
-                    st.metric("Model Run Total Estimate", model_total)
-
-                    kalshi_line = st.number_input("Enter Kalshi Line", min_value=0.0, max_value=20.0, value=8.5, step=0.5, key="line_" + game_id)
-
-                    auto_prob = model_to_probability(model_total, kalshi_line)
-
-                    if model_total > kalshi_line:
-                        st.info("Model leans OVER — suggested probability: " + str(auto_prob) + "%")
-                    elif model_total < kalshi_line:
-                        st.info("Model leans UNDER — suggested probability: " + str(auto_prob) + "%")
-                    else:
-                        st.info("Model is neutral on this game.")
-
-                    kalshi_over_price = st.number_input("Kalshi Over Price (cents)", min_value=1, max_value=99, value=50, step=1, key="price_" + game_id)
-                    your_prob = st.slider("Your Over Probability %", 0, 100, auto_prob, key="prob_" + game_id)
-
-                    kalshi_implied = kalshi_over_price / 100
-                    your_implied = your_prob / 100
-                    edge = your_implied - kalshi_implied
-
-                    if edge >= EDGE_THRESHOLD:
-                        bet_pct, bet_amt = calc_kelly(edge)
-                        st.success("BET OVER - Edge: " + str(round(edge*100,1)) + "% | Bet: $" + str(bet_amt))
-                    elif edge <= -EDGE_THRESHOLD:
-                        bet_pct, bet_amt = calc_kelly(abs(edge))
-                        st.success("BET UNDER - Edge: " + str(round(abs(edge)*100,1)) + "% | Bet: $" + str(bet_amt))
-                    else:
-                        st.info("No edge. Current edge: " + str(round(edge*100,1)) + "%")
-
-            except Exception as game_error:
-                st.warning("Could not load game: " + str(game_error))
-                continue
-
-except Exception as e:
-    st.error("Error: " + str(e))
+Also add `supabase` to your `requirements.txt`. Open that file and add it so it looks like:
+```
+streamlit
+mlb-statsapi
+pandas
+supabase
