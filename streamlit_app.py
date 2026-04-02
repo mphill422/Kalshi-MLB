@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 1.7 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 1.8 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -48,7 +48,6 @@ TEAM_RUNS_2025 = {
 }
 
 PITCHER_ERA_2025 = {
-    # Elite aces
     "Paul Skenes": 1.96,
     "Yoshinobu Yamamoto": 2.49,
     "Chris Sale": 3.10,
@@ -59,7 +58,6 @@ PITCHER_ERA_2025 = {
     "Logan Webb": 3.12,
     "Hunter Brown": 3.18,
     "Corbin Burnes": 3.22,
-    # Good starters
     "Max Fried": 3.25,
     "Zack Wheeler": 3.18,
     "Kevin Gausman": 3.45,
@@ -74,7 +72,6 @@ PITCHER_ERA_2025 = {
     "Sandy Alcantara": 3.50,
     "Freddy Peralta": 3.40,
     "Yu Darvish": 3.80,
-    # Average/below starters
     "Luis Severino": 4.10,
     "Andrew Abbott": 4.05,
     "Cade Cavalli": 4.55,
@@ -119,6 +116,12 @@ def calc_kelly(edge):
     bet_pct = min(kelly, MAX_BET_PCT)
     bet_amt = round(BANKROLL * bet_pct, 2)
     return round(bet_pct * 100, 1), bet_amt
+
+def model_to_probability(model_total, kalshi_line):
+    diff = model_total - kalshi_line
+    prob = 50 + (diff * 8)
+    prob = max(20, min(80, prob))
+    return int(round(prob))
 
 try:
     today = datetime.today().strftime('%Y-%m-%d')
@@ -172,8 +175,18 @@ try:
                     st.metric("Model Run Total Estimate", model_total)
 
                     kalshi_line = st.number_input("Enter Kalshi Line", min_value=0.0, max_value=20.0, value=8.5, step=0.5, key="line_" + game_id)
+
+                    auto_prob = model_to_probability(model_total, kalshi_line)
+
+                    if model_total > kalshi_line:
+                        st.info("Model leans OVER — suggested probability: " + str(auto_prob) + "%")
+                    elif model_total < kalshi_line:
+                        st.info("Model leans UNDER — suggested probability: " + str(auto_prob) + "%")
+                    else:
+                        st.info("Model is neutral on this game.")
+
                     kalshi_over_price = st.number_input("Kalshi Over Price (cents)", min_value=1, max_value=99, value=50, step=1, key="price_" + game_id)
-                    your_prob = st.slider("Your Over Probability %", 0, 100, 50, key="prob_" + game_id)
+                    your_prob = st.slider("Your Over Probability %", 0, 100, auto_prob, key="prob_" + game_id)
 
                     kalshi_implied = kalshi_over_price / 100
                     your_implied = your_prob / 100
