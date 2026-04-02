@@ -265,11 +265,4 @@ with tab2:
             st.error("Error loading settlements: " + str(e))
     else:
         st.warning("Supabase not connected.")
-```
 
-Also add `supabase` to your `requirements.txt`. Open that file and add it so it looks like:
-```
-streamlit
-mlb-statsapi
-pandas
-supabase
