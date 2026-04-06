@@ -7,7 +7,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 3.1 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 3.2 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -501,8 +501,115 @@ def run_auto_settlement():
     else:
         progress.empty()
 
+
+# ── Kalshi MLB market feed ────────────────────────────────────────────────────
+# Team abbreviation map: Kalshi 3-letter code → full team name fragment
+KALSHI_TEAM_MAP = {
+    "NYY": "Yankees", "BOS": "Red Sox", "TOR": "Blue Jays",
+    "BAL": "Orioles", "TBR": "Rays",    "TAM": "Rays",
+    "CLE": "Guardians", "MIN": "Twins", "DET": "Tigers",
+    "KCR": "Royals",  "KAN": "Royals", "CWS": "White Sox", "CHW": "White Sox",
+    "HOU": "Astros",  "SEA": "Mariners", "TEX": "Rangers",
+    "LAA": "Angels",  "OAK": "Athletics", "ATH": "Athletics",
+    "NYM": "Mets",    "PHI": "Phillies", "ATL": "Braves",
+    "WSH": "Nationals", "WAS": "Nationals", "MIA": "Marlins",
+    "CHC": "Cubs",    "MIL": "Brewers", "STL": "Cardinals",
+    "PIT": "Pirates", "CIN": "Reds",
+    "LAD": "Dodgers", "SDP": "Padres",  "SAN": "Padres",
+    "ARI": "Diamondbacks", "SFG": "Giants", "COL": "Rockies",
+}
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def fetch_kalshi_mlb_lines():
+    """
+    Fetch all open KXMLBGAME markets from Kalshi public API.
+    Returns dict keyed by (away_fragment, home_fragment) -> {line, over_price_cents, ticker}
+    Ticker format: KXMLBGAME-26APR061940DETMIN
+    """
+    try:
+        url = "https://api.elections.kalshi.com/trade-api/v2/markets"
+        params = {
+            "series_ticker": "KXMLBGAME",
+            "status": "open",
+            "limit": 200,
+        }
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code != 200:
+            return {}
+
+        markets = resp.json().get("markets", [])
+        result = {}
+
+        for mkt in markets:
+            title = mkt.get("title", "")
+            ticker = mkt.get("ticker", "")
+            # Only process "Over X.X runs scored" markets (not under, not spread)
+            if "Over" not in title or "runs scored" not in title:
+                continue
+
+            # Parse line from title e.g. "Over 7.5 runs scored"
+            try:
+                line = float(title.split("Over")[1].split("runs")[0].strip())
+            except Exception:
+                continue
+
+            # Parse team codes from ticker e.g. KXMLBGAME-26APR061940DETMIN -> DETMIN
+            try:
+                suffix = ticker.split("-")[-1]  # e.g. DETMIN or 26APR061940DETMIN
+                # Strip leading date if present (digits + month)
+                import re
+                match = re.search(r'[A-Z]{3}[A-Z]{2,3}$', suffix)
+                if not match:
+                    # Try last 6 chars as away(3)+home(3)
+                    codes = suffix[-6:]
+                else:
+                    codes = match.group()
+                away_code = codes[:3]
+                home_code = codes[3:]
+            except Exception:
+                continue
+
+            away_team = KALSHI_TEAM_MAP.get(away_code, "")
+            home_team = KALSHI_TEAM_MAP.get(home_code, "")
+            if not away_team or not home_team:
+                continue
+
+            # Over price: yes_bid is the over price in dollars (0-1 scale)
+            yes_bid = mkt.get("yes_bid_dollars") or mkt.get("yes_bid", 0)
+            try:
+                over_price_cents = round(float(yes_bid) * 100)
+            except Exception:
+                over_price_cents = 50
+
+            key = (away_team.lower(), home_team.lower())
+            result[key] = {
+                "line": line,
+                "over_price_cents": over_price_cents,
+                "ticker": ticker,
+                "title": title,
+            }
+
+        return result
+    except Exception:
+        return {}
+
+def match_kalshi_line(away_name, home_name, kalshi_lines):
+    """
+    Find the Kalshi market for a given game by fuzzy team name matching.
+    Returns {line, over_price_cents} or None.
+    """
+    for (k_away, k_home), data in kalshi_lines.items():
+        if k_away in away_name.lower() or away_name.lower() in k_away:
+            if k_home in home_name.lower() or home_name.lower() in k_home:
+                return data
+    return None
+
 # ── Auto-settlement on load ───────────────────────────────────────────────────
 run_auto_settlement()
+
+# ── Fetch Kalshi lines ────────────────────────────────────────────────────────
+kalshi_lines = fetch_kalshi_mlb_lines()
+kalshi_status = f"✅ Kalshi feed: {len(kalshi_lines)} game(s) loaded" if kalshi_lines else "⚠️ Kalshi feed unavailable — enter lines manually"
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["Today's Games", "Settlement Tracker"])
@@ -529,25 +636,36 @@ with tab1:
                     _model = m["model_total"]
                     _pf = m["park_factor"]
                     _pf_str = f"{_pf:.2f} {'🏔️' if _pf >= 1.04 else '⬆️' if _pf > 1.0 else '➡️' if _pf == 1.0 else '⬇️'}"
-                    _diff = round(_model - 8.5, 1)
+                    # Use real Kalshi line if available, else 8.5 default
+                    _kalshi = match_kalshi_line(_away, _home, kalshi_lines)
+                    _k_line = _kalshi["line"] if _kalshi else 8.5
+                    _k_price = _kalshi["over_price_cents"] if _kalshi else 50
+                    _has_kalshi = _kalshi is not None
+
+                    _diff = round(_model - _k_line, 1)
                     _lean = "OVER" if _diff > 0.3 else "UNDER" if _diff < -0.3 else "EVEN"
                     _diff_str = f"{_diff:+.1f}"
 
-                    # Edge vs default 8.5 line @ 50 cents
-                    _default_prob = model_to_probability(_model, 8.5) / 100
-                    _default_edge = _default_prob - 0.50 if _lean == "OVER" else (1 - _default_prob) - 0.50
-                    _edge_pct = round(abs(_default_edge) * 100, 1)
+                    # Real edge vs actual Kalshi market
+                    _model_prob = model_to_probability(_model, _k_line) / 100
+                    if _lean == "OVER":
+                        _real_edge = _model_prob - (_k_price / 100)
+                    else:
+                        _real_edge = (1 - _model_prob) - (1 - _k_price / 100)
+                    _edge_pct = round(abs(_real_edge) * 100, 1)
+                    _has_edge = _real_edge >= EDGE_THRESHOLD
 
                     # Confidence tier
-                    if _edge_pct >= 12:
+                    if not _has_edge:
+                        _tier = "⚪ NO EDGE"
+                    elif _edge_pct >= 12:
                         _tier = "🔥 HIGH"
                     elif _edge_pct >= 8:
                         _tier = "💪 STRONG"
-                    elif _edge_pct >= 5:
-                        _tier = "👍 LEAN"
                     else:
-                        _tier = "⚪ NO EDGE"
+                        _tier = "👍 LEAN"
 
+                    _line_label = f"{_k_line} {'✅' if _has_kalshi else '~'}"
                     summary_rows.append({
                         "Time": _et,
                         "Matchup": f"{_away} @ {_home}",
@@ -555,7 +673,8 @@ with tab1:
                         "Home SP": _hp if _hp != 'TBD' else '❓',
                         "Park": _pf_str,
                         "Model": _model,
-                        "vs 8.5": ("🟢 " if _diff > 0.3 else "🔴 " if _diff < -0.3 else "⚪ ") + _diff_str,
+                        "Line": _line_label,
+                        "vs Line": ("🟢 " if _diff > 0.3 else "🔴 " if _diff < -0.3 else "⚪ ") + _diff_str,
                         "Lean": "🟢 OVER" if _lean == "OVER" else "🔴 UNDER" if _lean == "UNDER" else "⚪ EVEN",
                         "Edge": f"{_edge_pct}%",
                         "Signal": _tier,
@@ -565,7 +684,7 @@ with tab1:
 
             if summary_rows:
                 st.subheader("📋 Today's Slate")
-                st.caption("Model totals vs default 8.5 line — open a game below to enter the real Kalshi line.")
+                st.caption(kalshi_status)
                 st.dataframe(
                     pd.DataFrame(summary_rows),
                     use_container_width=True,
@@ -639,7 +758,14 @@ with tab1:
 
                         st.metric("🎯 Model Run Total Estimate", model_total)
 
-                        kalshi_line = st.number_input("Enter Kalshi Line", min_value=0.0, max_value=20.0, value=8.5, step=0.5, key="line_" + game_id)
+                        # Pre-fill from Kalshi feed if available
+                        _game_kalshi = match_kalshi_line(away, home, kalshi_lines)
+                        _default_line = float(_game_kalshi["line"]) if _game_kalshi else 8.5
+                        _default_price = int(_game_kalshi["over_price_cents"]) if _game_kalshi else 50
+                        if _game_kalshi:
+                            st.success(f"✅ Kalshi line auto-loaded: {_default_line} | Over price: {_default_price}¢")
+
+                        kalshi_line = st.number_input("Enter Kalshi Line", min_value=0.0, max_value=20.0, value=_default_line, step=0.5, key="line_" + game_id)
                         auto_prob = model_to_probability(model_total, kalshi_line)
 
                         if model_total > kalshi_line:
@@ -649,7 +775,7 @@ with tab1:
                         else:
                             st.info("Model is neutral on this game.")
 
-                        kalshi_over_price = st.number_input("Kalshi Over Price (cents)", min_value=1, max_value=99, value=50, step=1, key="price_" + game_id)
+                        kalshi_over_price = st.number_input("Kalshi Over Price (cents)", min_value=1, max_value=99, value=_default_price, step=1, key="price_" + game_id)
                         your_prob = st.slider("Your Over Probability %", 0, 100, auto_prob, key="prob_" + game_id)
 
                         kalshi_implied = kalshi_over_price / 100
@@ -723,3 +849,4 @@ with tab2:
             st.error("Error loading settlements: " + str(e))
     else:
         st.warning("Supabase not connected.")
+        
