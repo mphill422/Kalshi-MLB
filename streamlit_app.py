@@ -6,7 +6,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 1.9 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 2.0 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -133,7 +133,9 @@ def model_to_probability(model_total, kalshi_line):
     prob = max(20, min(80, prob))
     return int(round(prob))
 
-def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total, kalshi_line, kalshi_over_price, model_prob, your_prob, edge, direction, bet_amt):
+def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
+             kalshi_line, kalshi_over_price, model_prob, your_prob, edge,
+             direction, bet_amt, game_id=None):
     try:
         supabase.table("mlb_settlements").insert({
             "game_date": game_date,
@@ -148,13 +150,163 @@ def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total, kal
             "your_prob": your_prob,
             "edge": round(edge, 4),
             "bet_direction": direction,
-            "bet_amount": bet_amt
+            "bet_amount": bet_amt,
+            "game_id": game_id,
         }).execute()
         return True
     except Exception as e:
         st.error("Save error: " + str(e))
         return False
 
+def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=None):
+    """
+    Fetch final run totals for a completed game.
+    Tries by game_id first; falls back to matching by date + team names.
+    Returns (away_runs, home_runs, total_runs) or None if not available.
+    """
+    try:
+        if game_id:
+            games = statsapi.schedule(game_id=int(game_id), sportId=1, hydrate='linescore')
+        else:
+            games = statsapi.schedule(date=game_date, sportId=1, hydrate='linescore')
+
+        if not games:
+            return None
+
+        for g in games:
+            # If we don't have a game_id, match by team name substring
+            if not game_id:
+                away_match = away_team and (
+                    away_team.lower() in g.get('away_name', '').lower() or
+                    g.get('away_name', '').lower() in away_team.lower()
+                )
+                home_match = home_team and (
+                    home_team.lower() in g.get('home_name', '').lower() or
+                    g.get('home_name', '').lower() in home_team.lower()
+                )
+                if not (away_match and home_match):
+                    continue
+
+            status = g.get('status', '')
+            if status not in ('Final', 'Game Over', 'Completed Early'):
+                return None  # Game not finished yet
+
+            away_runs = g.get('away_score')
+            home_runs = g.get('home_score')
+
+            if away_runs is None or home_runs is None:
+                return None
+
+            return int(away_runs), int(home_runs), int(away_runs) + int(home_runs)
+
+        return None
+
+    except Exception:
+        return None
+
+def settle_result(actual_total, kalshi_line, bet_direction, bet_amount, kalshi_over_price):
+    """
+    Determine win/loss/push and calculate P&L.
+    Returns (result_str, profit_loss)
+    """
+    if actual_total == kalshi_line:
+        return "PUSH", 0.0
+
+    if bet_direction == "OVER":
+        won = actual_total > kalshi_line
+        price = kalshi_over_price / 100
+    else:  # UNDER
+        won = actual_total < kalshi_line
+        price = 1 - (kalshi_over_price / 100)
+
+    if won:
+        payout = round(bet_amount * ((1 / price) - 1), 2)
+        return "WIN", payout
+    else:
+        return "LOSS", -round(bet_amount, 2)
+
+def run_auto_settlement():
+    """
+    Called on app load. Finds all unsettled rows (actual_total IS NULL)
+    for games before today, fetches final scores, and upserts results.
+    """
+    if not supabase_connected:
+        return
+
+    today_str = datetime.today().strftime('%Y-%m-%d')
+
+    try:
+        resp = supabase.table("mlb_settlements") \
+            .select("*") \
+            .is_("actual_total", "null") \
+            .lt("game_date", today_str) \
+            .execute()
+    except Exception:
+        return
+
+    rows = resp.data if resp.data else []
+    if not rows:
+        return
+
+    settled_count = 0
+    skipped_count = 0
+
+    progress = st.empty()
+    progress.info(f"⏳ Auto-settling {len(rows)} unsettled bet(s)...")
+
+    for row in rows:
+        row_id = row.get("id")
+        game_id = row.get("game_id")
+        game_date = row.get("game_date")
+        away_team = row.get("away_team")
+        home_team = row.get("home_team")
+        kalshi_line = row.get("kalshi_line")
+        kalshi_over_price = row.get("kalshi_over_price", 50)
+        bet_direction = row.get("bet_direction")
+        bet_amount = row.get("bet_amount", 0)
+
+        score = fetch_final_score(
+            game_id=game_id,
+            game_date=game_date,
+            away_team=away_team,
+            home_team=home_team
+        )
+
+        if score is None:
+            skipped_count += 1
+            continue
+
+        away_runs, home_runs, actual_total = score
+        result, profit_loss = settle_result(
+            actual_total, kalshi_line, bet_direction, bet_amount, kalshi_over_price
+        )
+
+        try:
+            supabase.table("mlb_settlements").update({
+                "actual_total": actual_total,
+                "away_score": away_runs,
+                "home_score": home_runs,
+                "result": result,
+                "profit_loss": profit_loss,
+                "settled_at": datetime.utcnow().isoformat(),
+            }).eq("id", row_id).execute()
+            settled_count += 1
+        except Exception:
+            skipped_count += 1
+            continue
+
+    if settled_count > 0 or skipped_count > 0:
+        msg = f"✅ Auto-settlement complete: {settled_count} settled"
+        if skipped_count:
+            msg += f", {skipped_count} skipped (game not final or score unavailable)"
+        progress.success(msg)
+    else:
+        progress.empty()
+
+# ── Auto-settlement runs on every app load ──────────────────────────────────
+run_auto_settlement()
+
+# ── Tabs ─────────────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["Today's Games", "Settlement Tracker"])
 
 with tab1:
@@ -232,14 +384,20 @@ with tab1:
                             st.success("BET OVER - Edge: " + str(round(edge*100,1)) + "% | Bet: $" + str(bet_amt))
                             if supabase_connected:
                                 if st.button("Log This Bet", key="log_" + game_id):
-                                    if save_bet(today, away, home, away_pitcher, home_pitcher, model_total, kalshi_line, kalshi_over_price, auto_prob, your_prob, edge, "OVER", bet_amt):
+                                    if save_bet(today, away, home, away_pitcher, home_pitcher,
+                                                model_total, kalshi_line, kalshi_over_price,
+                                                auto_prob, your_prob, edge, "OVER", bet_amt,
+                                                game_id=game_id):
                                         st.success("Bet logged!")
                         elif edge <= -EDGE_THRESHOLD:
                             bet_pct, bet_amt = calc_kelly(abs(edge))
                             st.success("BET UNDER - Edge: " + str(round(abs(edge)*100,1)) + "% | Bet: $" + str(bet_amt))
                             if supabase_connected:
                                 if st.button("Log This Bet", key="log_" + game_id):
-                                    if save_bet(today, away, home, away_pitcher, home_pitcher, model_total, kalshi_line, kalshi_over_price, auto_prob, your_prob, edge, "UNDER", bet_amt):
+                                    if save_bet(today, away, home, away_pitcher, home_pitcher,
+                                                model_total, kalshi_line, kalshi_over_price,
+                                                auto_prob, your_prob, edge, "UNDER", bet_amt,
+                                                game_id=game_id):
                                         st.success("Bet logged!")
                         else:
                             st.info("No edge. Current edge: " + str(round(edge*100,1)) + "%")
@@ -258,11 +416,37 @@ with tab2:
             data = supabase.table("mlb_settlements").select("*").order("game_date", desc=True).execute()
             if data.data:
                 df = pd.DataFrame(data.data)
-                st.dataframe(df[["game_date", "away_team", "home_team", "model_total", "kalshi_line", "bet_direction", "bet_amount", "actual_total", "result", "profit_loss"]])
+
+                # ── Summary metrics ───────────────────────────────────────────
+                settled = df[df["result"].notna()]
+                if not settled.empty:
+                    total_bets = len(settled)
+                    wins = (settled["result"] == "WIN").sum()
+                    losses = (settled["result"] == "LOSS").sum()
+                    pushes = (settled["result"] == "PUSH").sum()
+                    total_pnl = settled["profit_loss"].sum()
+                    win_pct = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0
+
+                    m1, m2, m3, m4, m5 = st.columns(5)
+                    m1.metric("Total Bets", total_bets)
+                    m2.metric("Record", f"{wins}W-{losses}L-{pushes}P")
+                    m3.metric("Win %", f"{win_pct}%")
+                    m4.metric("Total P&L", f"${total_pnl:+.2f}")
+                    m5.metric("Unsettled", len(df[df["result"].isna()]))
+
+                    st.markdown("---")
+
+                # ── Full table ────────────────────────────────────────────────
+                display_cols = [c for c in [
+                    "game_date", "away_team", "home_team",
+                    "model_total", "kalshi_line", "bet_direction", "bet_amount",
+                    "actual_total", "result", "profit_loss", "settled_at"
+                ] if c in df.columns]
+
+                st.dataframe(df[display_cols], use_container_width=True)
             else:
                 st.info("No bets logged yet.")
         except Exception as e:
             st.error("Error loading settlements: " + str(e))
     else:
         st.warning("Supabase not connected.")
-
