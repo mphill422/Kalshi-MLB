@@ -6,7 +6,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 2.2 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 2.3 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -400,6 +400,48 @@ with tab1:
         if not schedule:
             st.warning("No games scheduled today.")
         else:
+            # ── Compact summary table ─────────────────────────────────────────
+            summary_rows = []
+            for g in schedule:
+                try:
+                    _home = g['home_name']
+                    _away = g['away_name']
+                    _hp = g.get('home_probable_pitcher', 'TBD')
+                    _ap = g.get('away_probable_pitcher', 'TBD')
+                    _utc = datetime.strptime(g['game_datetime'], '%Y-%m-%dT%H:%M:%SZ')
+                    _et = (_utc - timedelta(hours=4)).strftime('%I:%M %p')
+                    _away_rpg = get_team_rpg(_away)
+                    _home_rpg = get_team_rpg(_home) + HOME_ADVANTAGE_RUNS
+                    _base = _away_rpg + _home_rpg
+                    _model = round((_base + era_adjustment(get_pitcher_era(_ap)) + era_adjustment(get_pitcher_era(_hp))) * get_park_factor(_home), 1)
+                    _pf = get_park_factor(_home)
+                    _pf_str = f"{_pf:.2f} {'🏔️' if _pf >= 1.04 else '⬆️' if _pf > 1.0 else '➡️' if _pf == 1.0 else '⬇️'}"
+                    _diff = _model - 8.5
+                    _lean = "⬆️ OVER" if _diff > 0.3 else "⬇️ UNDER" if _diff < -0.3 else "➡️ EVEN"
+                    summary_rows.append({
+                        "Time": _et,
+                        "Matchup": f"{_away} @ {_home}",
+                        "Away SP": _ap if _ap != 'TBD' else '❓',
+                        "Home SP": _hp if _hp != 'TBD' else '❓',
+                        "Park": _pf_str,
+                        "Model": _model,
+                        "vs 8.5": f"{_diff:+.1f}",
+                        "Lean": _lean,
+                    })
+                except Exception:
+                    continue
+
+            if summary_rows:
+                st.subheader("📋 Today's Slate")
+                st.caption("Model totals vs default 8.5 line — open a game below to enter the real Kalshi line.")
+                st.dataframe(
+                    pd.DataFrame(summary_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                st.markdown("---")
+
+            # ── Game expanders ────────────────────────────────────────────────
             for game in schedule:
                 try:
                     home = game['home_name']
