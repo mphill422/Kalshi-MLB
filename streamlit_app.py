@@ -1,18 +1,22 @@
 import streamlit as st
 import statsapi
 import pandas as pd
+import requests
 from datetime import datetime, timedelta
 from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 2.5 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 3.0 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
 KELLY_FRACTION = 0.5
 MAX_BET_PCT = 0.05
 LEAGUE_AVG_ERA = 4.20
+LEAGUE_AVG_BULLPEN_ERA = 4.10
+SP_INNINGS = 5.0   # expected starter innings
+TOTAL_INNINGS = 9.0
 
 try:
     supabase = create_client(
@@ -23,6 +27,7 @@ try:
 except:
     supabase_connected = False
 
+# ── Team offense (2025 full season RPG baseline) ──────────────────────────────
 TEAM_RUNS_2025 = {
     # AL East
     "New York Yankees": 4.7,
@@ -63,7 +68,48 @@ TEAM_RUNS_2025 = {
     "Colorado Rockies": 4.5,
 }
 
-# Park run factors: 1.0 = neutral, >1.0 = hitter friendly, <1.0 = pitcher friendly
+# ── Bullpen ERA by team (2025 full season) ────────────────────────────────────
+TEAM_BULLPEN_ERA = {
+    # AL East
+    "New York Yankees": 3.20,   # Elite — Bednar, Holmes, Abreu
+    "Boston Red Sox": 4.10,
+    "Toronto Blue Jays": 3.85,
+    "Baltimore Orioles": 3.95,
+    "Tampa Bay Rays": 3.50,     # Jax, strong pen
+    # AL Central
+    "Cleveland Guardians": 3.70,
+    "Minnesota Twins": 4.00,
+    "Detroit Tigers": 3.90,
+    "Kansas City Royals": 4.50, # Blown saves early 2026
+    "Chicago White Sox": 5.10,  # Weak pen
+    # AL West
+    "Houston Astros": 3.40,     # Abreu, strong core
+    "Seattle Mariners": 3.72,   # Hader anchor
+    "Texas Rangers": 4.20,
+    "Los Angeles Angels": 4.60,
+    "Oakland Athletics": 4.80,
+    "Athletics": 4.80,
+    # NL East
+    "New York Mets": 3.80,      # Diaz
+    "Philadelphia Phillies": 3.60,
+    "Atlanta Braves": 3.90,
+    "Washington Nationals": 4.40,
+    "Miami Marlins": 4.30,
+    # NL Central
+    "Chicago Cubs": 4.10,
+    "Milwaukee Brewers": 3.30,  # Megill, Ashby — elite
+    "St. Louis Cardinals": 4.20,
+    "Pittsburgh Pirates": 4.00,
+    "Cincinnati Reds": 4.30,
+    # NL West
+    "Los Angeles Dodgers": 3.60, # Diaz signed, upgraded
+    "San Diego Padres": 3.20,    # Best pen in MLB 2025
+    "Arizona Diamondbacks": 4.10,
+    "San Francisco Giants": 4.00,
+    "Colorado Rockies": 5.20,    # Worst pen in baseball
+}
+
+# ── Park factors ──────────────────────────────────────────────────────────────
 PARK_FACTORS = {
     "Colorado Rockies":        1.15,
     "Cincinnati Reds":         1.07,
@@ -99,6 +145,7 @@ PARK_FACTORS = {
 
 HOME_ADVANTAGE_RUNS = 0.20
 
+# ── Starting pitcher ERA (2025 season / 2026 projection) ─────────────────────
 PITCHER_ERA_2025 = {
     # Elite tier
     "Paul Skenes": 1.96,
@@ -156,7 +203,7 @@ PITCHER_ERA_2025 = {
     "Kyle Freeland": 4.65,
     "Cade Cavalli": 4.55,
     "Patrick Corbin": 5.20,
-    # New 2026 names from early slate
+    # 2026 names
     "Konnor Griffin": 3.90,
     "Simeon Woods Richardson": 4.40,
     "Jared Bubic": 4.50,
@@ -180,6 +227,7 @@ PITCHER_ERA_2025 = {
     "Hayden Wesneski": 4.40,
 }
 
+# ── Helper functions ──────────────────────────────────────────────────────────
 def get_park_factor(home_team):
     for key in PARK_FACTORS:
         if key.lower() in home_team.lower() or home_team.lower() in key.lower():
@@ -192,6 +240,12 @@ def get_team_rpg(team_name):
             return TEAM_RUNS_2025[key]
     return 4.2
 
+def get_bullpen_era(team_name):
+    for key in TEAM_BULLPEN_ERA:
+        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
+            return TEAM_BULLPEN_ERA[key]
+    return LEAGUE_AVG_BULLPEN_ERA
+
 def get_pitcher_era(pitcher_name):
     if not pitcher_name or pitcher_name == 'TBD':
         return LEAGUE_AVG_ERA
@@ -200,9 +254,105 @@ def get_pitcher_era(pitcher_name):
             return PITCHER_ERA_2025[key]
     return LEAGUE_AVG_ERA
 
+def get_pitcher_recent_era(pitcher_name):
+    """
+    Fetch last 3 starts ERA from StatsAPI.
+    Returns recent ERA or None if unavailable.
+    """
+    if not pitcher_name or pitcher_name == 'TBD':
+        return None
+    try:
+        results = statsapi.lookup_player(pitcher_name)
+        if not results:
+            return None
+        player_id = results[0]['id']
+        end_date = datetime.today().strftime('%Y-%m-%d')
+        start_date = (datetime.today() - timedelta(days=45)).strftime('%Y-%m-%d')
+        logs = statsapi.player_stat_data(
+            player_id,
+            group='pitching',
+            type='gameLog',
+            sportId=1
+        )
+        if not logs or 'stats' not in logs:
+            return None
+        games = logs['stats']
+        starts = [g for g in games if g.get('gamesStarted', 0) >= 1][-3:]
+        if not starts:
+            return None
+        total_er = sum(float(g.get('earnedRuns', 0)) for g in starts)
+        total_ip = sum(float(g.get('inningsPitched', 0)) for g in starts)
+        if total_ip < 3:
+            return None
+        return round((total_er / total_ip) * 9, 2)
+    except Exception:
+        return None
+
+def blend_pitcher_era(pitcher_name):
+    """
+    Blend season ERA (70%) with last 3 starts ERA (30%).
+    Falls back to season ERA if recent data unavailable.
+    """
+    season_era = get_pitcher_era(pitcher_name)
+    recent_era = get_pitcher_recent_era(pitcher_name)
+    if recent_era is None:
+        return season_era, None
+    blended = round(season_era * 0.70 + recent_era * 0.30, 2)
+    return blended, recent_era
+
 def era_adjustment(pitcher_era):
     diff = pitcher_era - LEAGUE_AVG_ERA
     return round(diff * 0.5, 2)
+
+def bullpen_adjustment(team_name):
+    """
+    Runs contributed by bullpen over expected ~4 innings.
+    Relative to league average bullpen.
+    """
+    bp_era = get_bullpen_era(team_name)
+    bp_innings = TOTAL_INNINGS - SP_INNINGS
+    league_bp_runs = (LEAGUE_AVG_BULLPEN_ERA / 9) * bp_innings
+    team_bp_runs = (bp_era / 9) * bp_innings
+    return round(team_bp_runs - league_bp_runs, 2)
+
+def calc_model_total(away, home, away_pitcher, home_pitcher):
+    """
+    Full model calculation. Returns dict of all components.
+    """
+    away_rpg = get_team_rpg(away)
+    home_rpg = get_team_rpg(home) + HOME_ADVANTAGE_RUNS
+    base_total = round(away_rpg + home_rpg, 1)
+
+    away_sp_era, away_recent = blend_pitcher_era(away_pitcher)
+    home_sp_era, home_recent = blend_pitcher_era(home_pitcher)
+
+    away_sp_adj = era_adjustment(away_sp_era)
+    home_sp_adj = era_adjustment(home_sp_era)
+
+    # Bullpen: away bullpen faces home offense, home bullpen faces away offense
+    away_bp_adj = bullpen_adjustment(away)
+    home_bp_adj = bullpen_adjustment(home)
+
+    park_factor = get_park_factor(home)
+
+    raw_total = base_total + away_sp_adj + home_sp_adj + away_bp_adj + home_bp_adj
+    model_total = round(raw_total * park_factor, 1)
+
+    return {
+        "base_total": base_total,
+        "away_sp_era": away_sp_era,
+        "home_sp_era": home_sp_era,
+        "away_recent_era": away_recent,
+        "home_recent_era": home_recent,
+        "away_sp_adj": away_sp_adj,
+        "home_sp_adj": home_sp_adj,
+        "away_bp_era": get_bullpen_era(away),
+        "home_bp_era": get_bullpen_era(home),
+        "away_bp_adj": away_bp_adj,
+        "home_bp_adj": home_bp_adj,
+        "park_factor": park_factor,
+        "model_total": model_total,
+    }
 
 def calc_kelly(edge):
     kelly = (edge / 1.0) * KELLY_FRACTION
@@ -242,22 +392,14 @@ def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
         return False
 
 def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=None):
-    """
-    Fetch final run totals for a completed game.
-    Tries by game_id first; falls back to matching by date + team names.
-    Returns (away_runs, home_runs, total_runs) or None if not available.
-    """
     try:
         if game_id:
             games = statsapi.schedule(game_id=int(game_id), sportId=1, hydrate='linescore')
         else:
             games = statsapi.schedule(date=game_date, sportId=1, hydrate='linescore')
-
         if not games:
             return None
-
         for g in games:
-            # If we don't have a game_id, match by team name substring
             if not game_id:
                 away_match = away_team and (
                     away_team.lower() in g.get('away_name', '').lower() or
@@ -269,39 +411,27 @@ def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=No
                 )
                 if not (away_match and home_match):
                     continue
-
             status = g.get('status', '')
             if status not in ('Final', 'Game Over', 'Completed Early'):
-                return None  # Game not finished yet
-
+                return None
             away_runs = g.get('away_score')
             home_runs = g.get('home_score')
-
             if away_runs is None or home_runs is None:
                 return None
-
             return int(away_runs), int(home_runs), int(away_runs) + int(home_runs)
-
         return None
-
     except Exception:
         return None
 
 def settle_result(actual_total, kalshi_line, bet_direction, bet_amount, kalshi_over_price):
-    """
-    Determine win/loss/push and calculate P&L.
-    Returns (result_str, profit_loss)
-    """
     if actual_total == kalshi_line:
         return "PUSH", 0.0
-
     if bet_direction == "OVER":
         won = actual_total > kalshi_line
         price = kalshi_over_price / 100
-    else:  # UNDER
+    else:
         won = actual_total < kalshi_line
         price = 1 - (kalshi_over_price / 100)
-
     if won:
         payout = round(bet_amount * ((1 / price) - 1), 2)
         return "WIN", payout
@@ -309,15 +439,9 @@ def settle_result(actual_total, kalshi_line, bet_direction, bet_amount, kalshi_o
         return "LOSS", -round(bet_amount, 2)
 
 def run_auto_settlement():
-    """
-    Called on app load. Finds all unsettled rows (actual_total IS NULL)
-    for games before today, fetches final scores, and upserts results.
-    """
     if not supabase_connected:
         return
-
     today_str = datetime.today().strftime('%Y-%m-%d')
-
     try:
         resp = supabase.table("mlb_settlements") \
             .select("*") \
@@ -326,17 +450,13 @@ def run_auto_settlement():
             .execute()
     except Exception:
         return
-
     rows = resp.data if resp.data else []
     if not rows:
         return
-
     settled_count = 0
     skipped_count = 0
-
     progress = st.empty()
     progress.info(f"⏳ Auto-settling {len(rows)} unsettled bet(s)...")
-
     for row in rows:
         row_id = row.get("id")
         game_id = row.get("game_id")
@@ -347,23 +467,19 @@ def run_auto_settlement():
         kalshi_over_price = row.get("kalshi_over_price", 50)
         bet_direction = row.get("bet_direction")
         bet_amount = row.get("bet_amount", 0)
-
         score = fetch_final_score(
             game_id=game_id,
             game_date=game_date,
             away_team=away_team,
             home_team=home_team
         )
-
         if score is None:
             skipped_count += 1
             continue
-
         away_runs, home_runs, actual_total = score
         result, profit_loss = settle_result(
             actual_total, kalshi_line, bet_direction, bet_amount, kalshi_over_price
         )
-
         try:
             supabase.table("mlb_settlements").update({
                 "actual_total": actual_total,
@@ -377,7 +493,6 @@ def run_auto_settlement():
         except Exception:
             skipped_count += 1
             continue
-
     if settled_count > 0 or skipped_count > 0:
         msg = f"✅ Auto-settlement complete: {settled_count} settled"
         if skipped_count:
@@ -386,10 +501,10 @@ def run_auto_settlement():
     else:
         progress.empty()
 
-# ── Auto-settlement runs on every app load ──────────────────────────────────
+# ── Auto-settlement on load ───────────────────────────────────────────────────
 run_auto_settlement()
 
-# ── Tabs ─────────────────────────────────────────────────────────────────────
+# ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["Today's Games", "Settlement Tracker"])
 
 with tab1:
@@ -410,14 +525,13 @@ with tab1:
                     _ap = g.get('away_probable_pitcher', 'TBD')
                     _utc = datetime.strptime(g['game_datetime'], '%Y-%m-%dT%H:%M:%SZ')
                     _et = (_utc - timedelta(hours=4)).strftime('%I:%M %p')
-                    _away_rpg = get_team_rpg(_away)
-                    _home_rpg = get_team_rpg(_home) + HOME_ADVANTAGE_RUNS
-                    _base = _away_rpg + _home_rpg
-                    _model = round((_base + era_adjustment(get_pitcher_era(_ap)) + era_adjustment(get_pitcher_era(_hp))) * get_park_factor(_home), 1)
-                    _pf = get_park_factor(_home)
+                    m = calc_model_total(_away, _home, _ap, _hp)
+                    _model = m["model_total"]
+                    _pf = m["park_factor"]
                     _pf_str = f"{_pf:.2f} {'🏔️' if _pf >= 1.04 else '⬆️' if _pf > 1.0 else '➡️' if _pf == 1.0 else '⬇️'}"
-                    _diff = _model - 8.5
-                    _lean = "⬆️ OVER" if _diff > 0.3 else "⬇️ UNDER" if _diff < -0.3 else "➡️ EVEN"
+                    _diff = round(_model - 8.5, 1)
+                    _lean = "OVER" if _diff > 0.3 else "UNDER" if _diff < -0.3 else "EVEN"
+                    _diff_str = f"{_diff:+.1f}"
                     summary_rows.append({
                         "Time": _et,
                         "Matchup": f"{_away} @ {_home}",
@@ -425,8 +539,8 @@ with tab1:
                         "Home SP": _hp if _hp != 'TBD' else '❓',
                         "Park": _pf_str,
                         "Model": _model,
-                        "vs 8.5": f"{_diff:+.1f}",
-                        "Lean": _lean,
+                        "vs 8.5": ("🟢 " if _diff > 0.3 else "🔴 " if _diff < -0.3 else "⚪ ") + _diff_str,
+                        "Lean": "🟢 OVER" if _lean == "OVER" else "🔴 UNDER" if _lean == "UNDER" else "⚪ EVEN",
                     })
                 except Exception:
                     continue
@@ -434,34 +548,8 @@ with tab1:
             if summary_rows:
                 st.subheader("📋 Today's Slate")
                 st.caption("Model totals vs default 8.5 line — open a game below to enter the real Kalshi line.")
-
-                styled_rows = []
-                for row in summary_rows:
-                    diff_val = row["vs 8.5"]
-                    lean_val = row["Lean"]
-                    try:
-                        fval = float(diff_val)
-                        diff_display = ("🟢 " if fval > 0.3 else "🔴 " if fval < -0.3 else "⚪ ") + diff_val
-                    except Exception:
-                        diff_display = diff_val
-                    lean_display = (
-                        "🟢 OVER" if "OVER" in lean_val else
-                        "🔴 UNDER" if "UNDER" in lean_val else
-                        "⚪ EVEN"
-                    )
-                    styled_rows.append({
-                        "Time": row["Time"],
-                        "Matchup": row["Matchup"],
-                        "Away SP": row["Away SP"],
-                        "Home SP": row["Home SP"],
-                        "Park": row["Park"],
-                        "Model": row["Model"],
-                        "vs 8.5": diff_display,
-                        "Lean": lean_display,
-                    })
-
                 st.dataframe(
-                    pd.DataFrame(styled_rows),
+                    pd.DataFrame(summary_rows),
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -489,46 +577,57 @@ with tab1:
                             st.markdown("**Home:** " + home)
                             st.caption("SP: " + home_pitcher)
 
-                        away_rpg = get_team_rpg(away)
-                        home_rpg = get_team_rpg(home) + HOME_ADVANTAGE_RUNS
-                        base_total = round(away_rpg + home_rpg, 1)
-
-                        away_era = get_pitcher_era(away_pitcher)
-                        home_era = get_pitcher_era(home_pitcher)
-
-                        away_adj = era_adjustment(away_era)
-                        home_adj = era_adjustment(home_era)
-
-                        park_factor = get_park_factor(home)
-                        model_total = round((base_total + away_adj + home_adj) * park_factor, 1)
+                        m = calc_model_total(away, home, away_pitcher, home_pitcher)
+                        model_total = m["model_total"]
 
                         st.markdown("---")
+
+                        # Row 1: Base total + park factor + home adv
                         col3, col4, col5 = st.columns(3)
                         with col3:
-                            st.metric("Base Total", base_total)
+                            st.metric("Base Total", m["base_total"])
                         with col4:
-                            st.metric("Away ERA", away_era)
+                            pf = m["park_factor"]
+                            st.metric("🏟️ Park Factor", pf,
+                                delta=f"{'Hitter' if pf > 1.0 else 'Pitcher' if pf < 1.0 else 'Neutral'} park")
                         with col5:
-                            st.metric("Home ERA", home_era)
-
-                        col6, col7 = st.columns(2)
-                        with col6:
-                            pf_label = "🏟️ Park Factor"
-                            pf_delta = f"{'Hitter' if park_factor > 1.0 else 'Pitcher' if park_factor < 1.0 else 'Neutral'} park"
-                            st.metric(pf_label, park_factor, delta=pf_delta)
-                        with col7:
                             st.metric("Home Advantage", f"+{HOME_ADVANTAGE_RUNS} R/G")
 
-                        st.metric("Model Run Total Estimate", model_total)
+                        # Row 2: SP ERAs with recent form
+                        col6, col7 = st.columns(2)
+                        with col6:
+                            away_era_label = f"Away SP ERA ({away_pitcher})"
+                            away_era_display = m["away_sp_era"]
+                            away_recent = m["away_recent_era"]
+                            delta_str = f"Recent: {away_recent}" if away_recent else "Season only"
+                            st.metric(away_era_label, away_era_display, delta=delta_str)
+                        with col7:
+                            home_era_label = f"Home SP ERA ({home_pitcher})"
+                            home_era_display = m["home_sp_era"]
+                            home_recent = m["home_recent_era"]
+                            delta_str = f"Recent: {home_recent}" if home_recent else "Season only"
+                            st.metric(home_era_label, home_era_display, delta=delta_str)
+
+                        # Row 3: Bullpen ERAs
+                        col8, col9 = st.columns(2)
+                        with col8:
+                            st.metric(f"Away Bullpen ERA ({away})",
+                                m["away_bp_era"],
+                                delta=f"Adj: {m['away_bp_adj']:+.2f} runs")
+                        with col9:
+                            st.metric(f"Home Bullpen ERA ({home})",
+                                m["home_bp_era"],
+                                delta=f"Adj: {m['home_bp_adj']:+.2f} runs")
+
+                        st.metric("🎯 Model Run Total Estimate", model_total)
 
                         kalshi_line = st.number_input("Enter Kalshi Line", min_value=0.0, max_value=20.0, value=8.5, step=0.5, key="line_" + game_id)
-
                         auto_prob = model_to_probability(model_total, kalshi_line)
 
                         if model_total > kalshi_line:
-                            st.info("Model leans OVER - suggested probability: " + str(auto_prob) + "%")
+                            st.info("Model leans OVER — suggested probability: " + str(auto_prob) + "%")
                         elif model_total < kalshi_line:
-                            st.info("Model leans UNDER - suggested probability: " + str(auto_prob) + "%")
+                            st.info("Model leans UNDER — suggested probability: " + str(auto_prob) + "%")
                         else:
                             st.info("Model is neutral on this game.")
 
@@ -541,7 +640,7 @@ with tab1:
 
                         if edge >= EDGE_THRESHOLD:
                             bet_pct, bet_amt = calc_kelly(edge)
-                            st.success("BET OVER - Edge: " + str(round(edge*100,1)) + "% | Bet: $" + str(bet_amt))
+                            st.success("BET OVER — Edge: " + str(round(edge*100,1)) + "% | Bet: $" + str(bet_amt))
                             if supabase_connected:
                                 if st.button("Log This Bet", key="log_" + game_id):
                                     if save_bet(today, away, home, away_pitcher, home_pitcher,
@@ -551,7 +650,7 @@ with tab1:
                                         st.success("Bet logged!")
                         elif edge <= -EDGE_THRESHOLD:
                             bet_pct, bet_amt = calc_kelly(abs(edge))
-                            st.success("BET UNDER - Edge: " + str(round(abs(edge)*100,1)) + "% | Bet: $" + str(bet_amt))
+                            st.success("BET UNDER — Edge: " + str(round(abs(edge)*100,1)) + "% | Bet: $" + str(bet_amt))
                             if supabase_connected:
                                 if st.button("Log This Bet", key="log_" + game_id):
                                     if save_bet(today, away, home, away_pitcher, home_pitcher,
@@ -577,7 +676,6 @@ with tab2:
             if data.data:
                 df = pd.DataFrame(data.data)
 
-                # ── Summary metrics ───────────────────────────────────────────
                 settled = df[df["result"].notna()]
                 if not settled.empty:
                     total_bets = len(settled)
@@ -593,16 +691,13 @@ with tab2:
                     m3.metric("Win %", f"{win_pct}%")
                     m4.metric("Total P&L", f"${total_pnl:+.2f}")
                     m5.metric("Unsettled", len(df[df["result"].isna()]))
-
                     st.markdown("---")
 
-                # ── Full table ────────────────────────────────────────────────
                 display_cols = [c for c in [
                     "game_date", "away_team", "home_team",
                     "model_total", "kalshi_line", "bet_direction", "bet_amount",
                     "actual_total", "result", "profit_loss", "settled_at"
                 ] if c in df.columns]
-
                 st.dataframe(df[display_cols], use_container_width=True)
             else:
                 st.info("No bets logged yet.")
