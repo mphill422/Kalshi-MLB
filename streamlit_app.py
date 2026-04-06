@@ -6,7 +6,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 2.1 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 2.2 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -24,38 +24,80 @@ except:
     supabase_connected = False
 
 TEAM_RUNS_2025 = {
-    "New York Yankees": 4.8,
-    "Los Angeles Dodgers": 5.1,
-    "Atlanta Braves": 5.0,
-    "Houston Astros": 4.6,
-    "Philadelphia Phillies": 4.9,
-    "Baltimore Orioles": 4.5,
-    "Minnesota Twins": 4.5,
-    "Texas Rangers": 4.4,
-    "Seattle Mariners": 4.2,
+    # AL East
+    "New York Yankees": 4.7,
     "Boston Red Sox": 4.7,
-    "San Diego Padres": 4.4,
-    "Cleveland Guardians": 4.3,
-    "Milwaukee Brewers": 4.2,
-    "Chicago Cubs": 4.4,
-    "San Francisco Giants": 4.1,
-    "Detroit Tigers": 4.3,
-    "Kansas City Royals": 4.4,
-    "Pittsburgh Pirates": 4.0,
     "Toronto Blue Jays": 4.8,
-    "New York Mets": 4.6,
-    "St. Louis Cardinals": 4.2,
-    "Arizona Diamondbacks": 4.7,
-    "Tampa Bay Rays": 4.2,
-    "Cincinnati Reds": 4.4,
-    "Washington Nationals": 3.9,
-    "Colorado Rockies": 4.5,
-    "Oakland Athletics": 3.8,
-    "Athletics": 3.8,
-    "Miami Marlins": 3.7,
+    "Baltimore Orioles": 4.5,
+    "Tampa Bay Rays": 4.1,
+    # AL Central
+    "Cleveland Guardians": 4.3,
+    "Minnesota Twins": 4.5,
+    "Detroit Tigers": 4.4,
+    "Kansas City Royals": 4.3,
     "Chicago White Sox": 3.6,
+    # AL West
+    "Houston Astros": 4.6,
+    "Seattle Mariners": 4.2,
+    "Texas Rangers": 4.4,
     "Los Angeles Angels": 3.9,
+    "Oakland Athletics": 3.7,
+    "Athletics": 3.7,
+    # NL East
+    "New York Mets": 4.7,
+    "Philadelphia Phillies": 4.9,
+    "Atlanta Braves": 5.0,
+    "Washington Nationals": 4.1,
+    "Miami Marlins": 3.8,
+    # NL Central
+    "Chicago Cubs": 4.4,
+    "Milwaukee Brewers": 4.3,
+    "St. Louis Cardinals": 4.2,
+    "Pittsburgh Pirates": 4.0,
+    "Cincinnati Reds": 4.4,
+    # NL West
+    "Los Angeles Dodgers": 5.1,
+    "San Diego Padres": 4.4,
+    "Arizona Diamondbacks": 4.7,
+    "San Francisco Giants": 4.1,
+    "Colorado Rockies": 4.5,
 }
+
+# Park run factors: 1.0 = neutral, >1.0 = hitter friendly, <1.0 = pitcher friendly
+PARK_FACTORS = {
+    "Colorado Rockies":        1.15,
+    "Cincinnati Reds":         1.07,
+    "Texas Rangers":           1.06,
+    "Boston Red Sox":          1.05,
+    "Chicago Cubs":            1.04,
+    "Philadelphia Phillies":   1.04,
+    "Baltimore Orioles":       1.03,
+    "Atlanta Braves":          1.02,
+    "Kansas City Royals":      1.02,
+    "Toronto Blue Jays":       1.01,
+    "Houston Astros":          1.01,
+    "Detroit Tigers":          1.00,
+    "Minnesota Twins":         1.00,
+    "New York Yankees":        1.00,
+    "Chicago White Sox":       1.00,
+    "Cleveland Guardians":     0.99,
+    "Pittsburgh Pirates":      0.99,
+    "St. Louis Cardinals":     0.98,
+    "Arizona Diamondbacks":    0.98,
+    "Washington Nationals":    0.98,
+    "Tampa Bay Rays":          0.97,
+    "Los Angeles Angels":      0.97,
+    "New York Mets":           0.97,
+    "Miami Marlins":           0.96,
+    "Oakland Athletics":       0.96,
+    "Athletics":               0.96,
+    "Seattle Mariners":        0.95,
+    "Los Angeles Dodgers":     0.95,
+    "San Francisco Giants":    0.94,
+    "San Diego Padres":        0.92,
+}
+
+HOME_ADVANTAGE_RUNS = 0.20
 
 PITCHER_ERA_2025 = {
     # Elite tier
@@ -137,6 +179,12 @@ PITCHER_ERA_2025 = {
     "Graham Ashcraft": 4.55,
     "Hayden Wesneski": 4.40,
 }
+
+def get_park_factor(home_team):
+    for key in PARK_FACTORS:
+        if key.lower() in home_team.lower() or home_team.lower() in key.lower():
+            return PARK_FACTORS[key]
+    return 1.0
 
 def get_team_rpg(team_name):
     for key in TEAM_RUNS_2025:
@@ -374,7 +422,7 @@ with tab1:
                             st.caption("SP: " + home_pitcher)
 
                         away_rpg = get_team_rpg(away)
-                        home_rpg = get_team_rpg(home)
+                        home_rpg = get_team_rpg(home) + HOME_ADVANTAGE_RUNS
                         base_total = round(away_rpg + home_rpg, 1)
 
                         away_era = get_pitcher_era(away_pitcher)
@@ -383,7 +431,8 @@ with tab1:
                         away_adj = era_adjustment(away_era)
                         home_adj = era_adjustment(home_era)
 
-                        model_total = round(base_total + away_adj + home_adj, 1)
+                        park_factor = get_park_factor(home)
+                        model_total = round((base_total + away_adj + home_adj) * park_factor, 1)
 
                         st.markdown("---")
                         col3, col4, col5 = st.columns(3)
@@ -393,6 +442,14 @@ with tab1:
                             st.metric("Away ERA", away_era)
                         with col5:
                             st.metric("Home ERA", home_era)
+
+                        col6, col7 = st.columns(2)
+                        with col6:
+                            pf_label = "🏟️ Park Factor"
+                            pf_delta = f"{'Hitter' if park_factor > 1.0 else 'Pitcher' if park_factor < 1.0 else 'Neutral'} park"
+                            st.metric(pf_label, park_factor, delta=pf_delta)
+                        with col7:
+                            st.metric("Home Advantage", f"+{HOME_ADVANTAGE_RUNS} R/G")
 
                         st.metric("Model Run Total Estimate", model_total)
 
