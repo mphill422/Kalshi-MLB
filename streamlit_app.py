@@ -6,7 +6,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 2.3 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 2.4 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -434,11 +434,56 @@ with tab1:
             if summary_rows:
                 st.subheader("📋 Today's Slate")
                 st.caption("Model totals vs default 8.5 line — open a game below to enter the real Kalshi line.")
-                st.dataframe(
-                    pd.DataFrame(summary_rows),
-                    use_container_width=True,
-                    hide_index=True,
-                )
+
+                def lean_color(lean):
+                    if "OVER" in lean:
+                        return "background-color:#1a4a2e; color:#4cff91; font-weight:bold;"
+                    elif "UNDER" in lean:
+                        return "background-color:#4a1a1a; color:#ff6b6b; font-weight:bold;"
+                    else:
+                        return "background-color:#2a2a2a; color:#aaaaaa; font-weight:bold;"
+
+                def diff_color(diff_str):
+                    try:
+                        val = float(diff_str)
+                        if val > 0.3:
+                            return "color:#4cff91;"
+                        elif val < -0.3:
+                            return "color:#ff6b6b;"
+                        else:
+                            return "color:#aaaaaa;"
+                    except:
+                        return ""
+
+                headers = ["Time", "Matchup", "Away SP", "Home SP", "Park", "Model", "vs 8.5", "Lean"]
+                html = """
+                <style>
+                .slate-table { width:100%; border-collapse:collapse; font-size:13px; }
+                .slate-table th { background:#1e1e1e; color:#888; padding:6px 10px; text-align:left; border-bottom:1px solid #333; }
+                .slate-table td { padding:6px 10px; border-bottom:1px solid #222; color:#ddd; }
+                .slate-table tr:hover td { background:#1a1a2e; }
+                </style>
+                <table class='slate-table'><thead><tr>"""
+                for h in headers:
+                    html += f"<th>{h}</th>"
+                html += "</tr></thead><tbody>"
+
+                for row in summary_rows:
+                    html += "<tr>"
+                    for col in headers:
+                        val = str(row[col])
+                        if col == "Lean":
+                            html += f"<td style='{lean_color(val)}'>{val}</td>"
+                        elif col == "vs 8.5":
+                            html += f"<td style='{diff_color(val)}'>{val}</td>"
+                        elif col == "Model":
+                            html += f"<td style='font-weight:bold;'>{val}</td>"
+                        else:
+                            html += f"<td>{val}</td>"
+                    html += "</tr>"
+                html += "</tbody></table>"
+
+                st.markdown(html, unsafe_allow_html=True)
                 st.markdown("---")
 
             # ── Game expanders ────────────────────────────────────────────────
