@@ -7,7 +7,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 3.0 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 3.1 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -532,6 +532,22 @@ with tab1:
                     _diff = round(_model - 8.5, 1)
                     _lean = "OVER" if _diff > 0.3 else "UNDER" if _diff < -0.3 else "EVEN"
                     _diff_str = f"{_diff:+.1f}"
+
+                    # Edge vs default 8.5 line @ 50 cents
+                    _default_prob = model_to_probability(_model, 8.5) / 100
+                    _default_edge = _default_prob - 0.50 if _lean == "OVER" else (1 - _default_prob) - 0.50
+                    _edge_pct = round(abs(_default_edge) * 100, 1)
+
+                    # Confidence tier
+                    if _edge_pct >= 12:
+                        _tier = "🔥 HIGH"
+                    elif _edge_pct >= 8:
+                        _tier = "💪 STRONG"
+                    elif _edge_pct >= 5:
+                        _tier = "👍 LEAN"
+                    else:
+                        _tier = "⚪ NO EDGE"
+
                     summary_rows.append({
                         "Time": _et,
                         "Matchup": f"{_away} @ {_home}",
@@ -541,6 +557,8 @@ with tab1:
                         "Model": _model,
                         "vs 8.5": ("🟢 " if _diff > 0.3 else "🔴 " if _diff < -0.3 else "⚪ ") + _diff_str,
                         "Lean": "🟢 OVER" if _lean == "OVER" else "🔴 UNDER" if _lean == "UNDER" else "⚪ EVEN",
+                        "Edge": f"{_edge_pct}%",
+                        "Signal": _tier,
                     })
                 except Exception:
                     continue
