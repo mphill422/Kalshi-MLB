@@ -7,7 +7,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 3.4 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 3.5 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -522,49 +522,79 @@ KALSHI_TEAM_MAP = {
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def fetch_kalshi_mlb_lines():
     """
-    Fetch all open KXMLBGAME markets from Kalshi public API.
+    Fetch all open KXMLBGAME markets from Kalshi public API using RSA auth.
     Returns dict keyed by (away_fragment, home_fragment) -> {line, over_price_cents, ticker}
-    Ticker format: KXMLBGAME-26APR061940DETMIN
     """
     import urllib.request
     import urllib.parse
     import json as _json
+    import time
+    import base64
+    import hashlib
+
     try:
+        # Load credentials from Streamlit secrets
+        api_key_id = st.secrets["kalshi"]["api_key_id"]
+        private_key_str = st.secrets["kalshi"]["private_key"]
+
+        # Build RSA signature
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.hazmat.backends import default_backend
+
+        # Load private key
+        private_key = serialization.load_pem_private_key(
+            private_key_str.encode(),
+            password=None,
+            backend=default_backend()
+        )
+
+        # Build request components
+        timestamp = str(int(time.time() * 1000))
+        method = "GET"
+        path = "/trade-api/v2/markets"
+        msg = timestamp + method + path
+        
+        # Sign the message
+        signature = private_key.sign(
+            msg.encode('utf-8'),
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+        sig_b64 = base64.b64encode(signature).decode('utf-8')
+
         params = urllib.parse.urlencode({
             "series_ticker": "KXMLBGAME",
             "status": "open",
             "limit": 200,
         })
         url = f"https://api.elections.kalshi.com/trade-api/v2/markets?{params}"
+        
         req = urllib.request.Request(
             url,
             headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "application/json",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://kalshi.com/",
-                "Origin": "https://kalshi.com",
+                "KALSHI-ACCESS-KEY": api_key_id,
+                "KALSHI-ACCESS-TIMESTAMP": timestamp,
+                "KALSHI-ACCESS-SIGNATURE": sig_b64,
+                "Content-Type": "application/json",
             }
         )
         with urllib.request.urlopen(req, timeout=15) as response:
             data = _json.loads(response.read().decode())
-        markets = data.get("markets", [])
 
-        markets = resp.json().get("markets", [])
+        markets = data.get("markets", [])
         result = {}
 
         for mkt in markets:
             title = mkt.get("title", "")
             ticker = mkt.get("ticker", "")
-            # Only process over/total run markets — filter out spread/moneyline
-            # custom_strike contains the line value directly
             custom_strike = mkt.get("custom_strike", "")
-            
-            # Skip non-total markets by checking title keywords
+
+            # Only process over/total run markets
             title_lower = title.lower()
-            is_total = ("total" in title_lower or "runs scored" in title_lower or 
+            is_total = ("total" in title_lower or "runs scored" in title_lower or
                        "over" in title_lower or "run" in title_lower)
-            is_spread = ("wins by" in title_lower or "spread" in title_lower or 
+            is_spread = ("wins by" in title_lower or "spread" in title_lower or
                         "moneyline" in title_lower or "winner" in title_lower)
             if is_spread or not is_total:
                 continue
@@ -574,7 +604,6 @@ def fetch_kalshi_mlb_lines():
                 if custom_strike:
                     line = float(custom_strike)
                 else:
-                    # Try parsing from title
                     import re as _re
                     nums = _re.findall(r'\d+\.\d+|\d+', title)
                     if not nums:
@@ -583,14 +612,12 @@ def fetch_kalshi_mlb_lines():
             except Exception:
                 continue
 
-            # Parse team codes from ticker e.g. KXMLBGAME-26APR061940DETMIN -> DETMIN
+            # Parse team codes from ticker
             try:
-                suffix = ticker.split("-")[-1]  # e.g. DETMIN or 26APR061940DETMIN
-                # Strip leading date if present (digits + month)
+                suffix = ticker.split("-")[-1]
                 import re
                 match = re.search(r'[A-Z]{3}[A-Z]{2,3}$', suffix)
                 if not match:
-                    # Try last 6 chars as away(3)+home(3)
                     codes = suffix[-6:]
                 else:
                     codes = match.group()
@@ -604,7 +631,7 @@ def fetch_kalshi_mlb_lines():
             if not away_team or not home_team:
                 continue
 
-            # Over price: yes_bid is the over price in dollars (0-1 scale)
+            # Over price
             yes_bid = mkt.get("yes_bid_dollars") or mkt.get("yes_bid", 0)
             try:
                 over_price_cents = round(float(yes_bid) * 100)
@@ -620,8 +647,10 @@ def fetch_kalshi_mlb_lines():
             }
 
         return result
-    except Exception:
+
+    except Exception as e:
         return {}
+
 
 def match_kalshi_line(away_name, home_name, kalshi_lines):
     """
