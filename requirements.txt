@@ -1,4 +1,6 @@
 streamlit
-mlb-statsapi
+statsapi
 pandas
 supabase
+requests
+cryptography
