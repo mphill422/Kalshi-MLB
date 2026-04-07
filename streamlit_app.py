@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 3.9 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.0 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -523,111 +523,90 @@ KALSHI_TEAM_MAP = {
 @st.cache_data(ttl=300)
 def fetch_kalshi_mlb_lines():
     """
-    Fetch Kalshi MLB lines with multiple fallback strategies.
+    Fetch Kalshi MLB lines via multiple proxy routes.
     """
     import urllib.request
     import urllib.parse
     import json as _json
     import ssl
-    import time
-    import base64
+    import re
 
-    KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
-    params = urllib.parse.urlencode({
-        "series_ticker": "KXMLBGAME",
-        "status": "open",
-        "limit": 200,
-    })
-    url = f"{KALSHI_BASE}/markets?{params}"
-
-    # Strategy 1: RSA authenticated request
-    def try_rsa_auth():
-        try:
-            from cryptography.hazmat.primitives import hashes, serialization
-            from cryptography.hazmat.primitives.asymmetric import padding
-            from cryptography.hazmat.backends import default_backend
-
-            api_key_id = st.secrets["kalshi"]["api_key_id"]
-            private_key_str = st.secrets["kalshi"]["private_key"]
-
-            private_key = serialization.load_pem_private_key(
-                private_key_str.strip().encode(),
-                password=None,
-                backend=default_backend()
-            )
-            timestamp = str(int(time.time() * 1000))
-            method = "GET"
-            path = f"/trade-api/v2/markets?{params}"
-            msg = timestamp + method + path
-            signature = private_key.sign(msg.encode('utf-8'), padding.PKCS1v15(), hashes.SHA256())
-            sig_b64 = base64.b64encode(signature).decode('utf-8')
-
-            ctx = ssl.create_default_context()
-            req = urllib.request.Request(
-                url,
-                headers={
-                    "KALSHI-ACCESS-KEY": api_key_id,
-                    "KALSHI-ACCESS-TIMESTAMP": timestamp,
-                    "KALSHI-ACCESS-SIGNATURE": sig_b64,
-                    "Content-Type": "application/json",
-                    "User-Agent": "Mozilla/5.0",
-                }
-            )
-            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
-                return _json.loads(r.read().decode()).get("markets", [])
-        except Exception as e1:
-            return None, str(e1)
-
-    # Strategy 2: Unauthenticated public endpoint
-    def try_public():
-        try:
-            ctx = ssl.create_default_context()
-            req = urllib.request.Request(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-                    "Accept": "application/json",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Referer": "https://kalshi.com",
-                    "Origin": "https://kalshi.com",
-                    "Connection": "keep-alive",
-                }
-            )
-            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
-                return _json.loads(r.read().decode()).get("markets", [])
-        except Exception as e2:
-            return None, str(e2)
-
-    # Strategy 3: No SSL verification (last resort)
-    def try_no_ssl():
-        try:
-            ctx = ssl._create_unverified_context()
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
-                return _json.loads(r.read().decode()).get("markets", [])
-        except Exception as e3:
-            return None, str(e3)
-
-    # Try each strategy
+    TARGET = "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXMLBGAME&status=open&limit=200"
+    ctx = ssl._create_unverified_context()
     errors = []
-    for strategy in [try_rsa_auth, try_public, try_no_ssl]:
+    markets = None
+
+    # Strategy 1: allorigins.win proxy
+    def try_allorigins():
+        try:
+            proxy_url = "https://api.allorigins.win/raw?url=" + urllib.parse.quote(TARGET)
+            req = urllib.request.Request(proxy_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+                return _json.loads(r.read().decode()).get("markets", [])
+        except Exception as e:
+            return None, f"allorigins: {e}"
+
+    # Strategy 2: corsproxy.io
+    def try_corsproxy():
+        try:
+            proxy_url = "https://corsproxy.io/?" + urllib.parse.quote(TARGET)
+            req = urllib.request.Request(proxy_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+                return _json.loads(r.read().decode()).get("markets", [])
+        except Exception as e:
+            return None, f"corsproxy: {e}"
+
+    # Strategy 3: Direct with requests library
+    def try_requests():
+        try:
+            import requests as req_lib
+            r = req_lib.get(TARGET, timeout=15, verify=False, headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+            })
+            return r.json().get("markets", [])
+        except Exception as e:
+            return None, f"requests: {e}"
+
+    # Strategy 4: socket-level raw HTTP
+    def try_socket():
+        try:
+            import socket, ssl as ssl_lib
+            host = "api.elections.kalshi.com"
+            path = "/trade-api/v2/markets?series_ticker=KXMLBGAME&status=open&limit=200"
+            ctx2 = ssl_lib._create_unverified_context()
+            with socket.create_connection((host, 443), timeout=15) as sock:
+                with ctx2.wrap_socket(sock, server_hostname=host) as ssock:
+                    req = f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: Mozilla/5.0\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+                    ssock.sendall(req.encode())
+                    resp = b""
+                    while True:
+                        chunk = ssock.recv(4096)
+                        if not chunk:
+                            break
+                        resp += chunk
+            body = resp.split(b"\r\n\r\n", 1)[1].decode(errors='ignore')
+            return _json.loads(body).get("markets", [])
+        except Exception as e:
+            return None, f"socket: {e}"
+
+    for strategy in [try_allorigins, try_corsproxy, try_requests, try_socket]:
         result = strategy()
         if isinstance(result, list):
             markets = result
             break
         elif isinstance(result, tuple):
             errors.append(result[1])
-    else:
+
+    if markets is None:
         return {"__error__": " | ".join(errors)}
 
-    # Parse markets into our format
+    # Parse into our format
     result = {}
-    import re
     for mkt in markets:
         title = mkt.get("title", "")
         ticker = mkt.get("ticker", "")
         custom_strike = mkt.get("custom_strike", "")
-
         title_lower = title.lower()
         is_total = ("total" in title_lower or "runs scored" in title_lower or
                    "over" in title_lower or "run" in title_lower)
@@ -635,12 +614,10 @@ def fetch_kalshi_mlb_lines():
                     "moneyline" in title_lower or "winner" in title_lower)
         if is_spread or not is_total:
             continue
-
         try:
             line = float(custom_strike) if custom_strike else float(re.findall(r'\d+\.\d+|\d+', title)[0])
         except Exception:
             continue
-
         try:
             suffix = ticker.split("-")[-1]
             match = re.search(r'[A-Z]{3}[A-Z]{2,3}$', suffix)
@@ -648,25 +625,21 @@ def fetch_kalshi_mlb_lines():
             away_code, home_code = codes[:3], codes[3:]
         except Exception:
             continue
-
         away_team = KALSHI_TEAM_MAP.get(away_code, "")
         home_team = KALSHI_TEAM_MAP.get(home_code, "")
         if not away_team or not home_team:
             continue
-
         try:
             yes_bid = mkt.get("yes_bid_dollars") or mkt.get("yes_bid", 0)
             over_price_cents = round(float(yes_bid) * 100)
         except Exception:
             over_price_cents = 50
-
         result[(away_team.lower(), home_team.lower())] = {
             "line": line,
             "over_price_cents": over_price_cents,
             "ticker": ticker,
             "title": title,
         }
-
     return result
 
 
