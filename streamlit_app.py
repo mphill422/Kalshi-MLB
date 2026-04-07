@@ -7,7 +7,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 3.5 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 3.6 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -649,6 +649,8 @@ def fetch_kalshi_mlb_lines():
         return result
 
     except Exception as e:
+        # Store error for display
+        st.session_state['kalshi_error'] = str(e)
         return {}
 
 
@@ -672,7 +674,8 @@ if kalshi_lines:
     kalshi_status = f"✅ Kalshi feed live: {len(kalshi_lines)} game(s) loaded"
     kalshi_caption_type = "success"
 else:
-    kalshi_status = "⚠️ Kalshi feed unavailable — enter lines manually"
+    err = st.session_state.get('kalshi_error', 'unknown error')
+    kalshi_status = f"⚠️ Kalshi feed unavailable ({err}) — enter lines manually"
     kalshi_caption_type = "warning"
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
