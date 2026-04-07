@@ -7,7 +7,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 3.3 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 3.4 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -526,20 +526,29 @@ def fetch_kalshi_mlb_lines():
     Returns dict keyed by (away_fragment, home_fragment) -> {line, over_price_cents, ticker}
     Ticker format: KXMLBGAME-26APR061940DETMIN
     """
+    import urllib.request
+    import urllib.parse
+    import json as _json
     try:
-        url = "https://api.elections.kalshi.com/trade-api/v2/markets"
-        params = {
+        params = urllib.parse.urlencode({
             "series_ticker": "KXMLBGAME",
             "status": "open",
             "limit": 200,
-        }
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; KalshiMLBModel/1.0)",
-            "Accept": "application/json",
-        }
-        resp = requests.get(url, params=params, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            return {}
+        })
+        url = f"https://api.elections.kalshi.com/trade-api/v2/markets?{params}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://kalshi.com/",
+                "Origin": "https://kalshi.com",
+            }
+        )
+        with urllib.request.urlopen(req, timeout=15) as response:
+            data = _json.loads(response.read().decode())
+        markets = data.get("markets", [])
 
         markets = resp.json().get("markets", [])
         result = {}
@@ -630,7 +639,12 @@ run_auto_settlement()
 
 # ── Fetch Kalshi lines ────────────────────────────────────────────────────────
 kalshi_lines = fetch_kalshi_mlb_lines()
-kalshi_status = f"✅ Kalshi feed: {len(kalshi_lines)} game(s) loaded" if kalshi_lines else "⚠️ Kalshi feed unavailable — enter lines manually"
+if kalshi_lines:
+    kalshi_status = f"✅ Kalshi feed live: {len(kalshi_lines)} game(s) loaded"
+    kalshi_caption_type = "success"
+else:
+    kalshi_status = "⚠️ Kalshi feed unavailable — enter lines manually"
+    kalshi_caption_type = "warning"
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["Today's Games", "Settlement Tracker"])
@@ -705,7 +719,10 @@ with tab1:
 
             if summary_rows:
                 st.subheader("📋 Today's Slate")
-                st.caption(kalshi_status)
+                if kalshi_caption_type == "success":
+                    st.success(kalshi_status)
+                else:
+                    st.warning(kalshi_status)
                 st.dataframe(
                     pd.DataFrame(summary_rows),
                     use_container_width=True,
