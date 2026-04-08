@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.1 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.2 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -520,7 +520,7 @@ KALSHI_TEAM_MAP = {
     "ARI": "Diamondbacks", "SFG": "Giants", "COL": "Rockies",
 }
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)  # 1 min cache so fresh data shows quickly
 def fetch_kalshi_mlb_lines():
     """
     Read Kalshi MLB lines from Supabase kalshi_lines table.
