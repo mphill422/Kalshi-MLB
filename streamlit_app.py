@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.2 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.3 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -235,17 +235,68 @@ def get_park_factor(home_team):
             return PARK_FACTORS[key]
     return 1.0
 
-def get_team_rpg(team_name):
-    for key in TEAM_RUNS_2025:
-        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
-            return TEAM_RUNS_2025[key]
-    return 4.2
-
 def get_bullpen_era(team_name):
     for key in TEAM_BULLPEN_ERA:
         if key.lower() in team_name.lower() or team_name.lower() in key.lower():
             return TEAM_BULLPEN_ERA[key]
     return LEAGUE_AVG_BULLPEN_ERA
+
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def fetch_live_team_rpg():
+    """
+    Fetch real 2026 season runs per game from StatsAPI for all teams.
+    Falls back to TEAM_RUNS_2025 baseline if unavailable or <10 games played.
+    """
+    try:
+        standings = statsapi.standings_data(leagueId="103,104", season=datetime.today().year)
+        team_stats = {}
+        
+        for league in standings.values():
+            for div in league.get('divisions', {}).values():
+                for team in div.get('teams', []):
+                    team_name = team.get('name', '')
+                    games = int(team.get('w', 0)) + int(team.get('l', 0))
+                    if games < 5:
+                        continue  # Too early — not enough sample
+                    
+                    # Get team hitting stats
+                    team_id = team.get('team_id')
+                    if not team_id:
+                        continue
+                    try:
+                        hitting = statsapi.team_stats(
+                            team_id,
+                            group='hitting',
+                            type='season',
+                            season=datetime.today().year
+                        )
+                        runs = None
+                        for stat in hitting.get('stats', []):
+                            splits = stat.get('splits', [])
+                            if splits:
+                                runs = splits[0].get('stat', {}).get('runs')
+                                break
+                        if runs and games:
+                            team_stats[team_name] = round(int(runs) / games, 2)
+                    except Exception:
+                        continue
+        return team_stats
+    except Exception:
+        return {}
+
+# Load live team RPG on startup (cached)
+_live_rpg = fetch_live_team_rpg()
+
+def get_team_rpg(team_name):
+    # Try live 2026 data first
+    for key in _live_rpg:
+        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
+            return _live_rpg[key]
+    # Fall back to 2025 baseline
+    for key in TEAM_RUNS_2025:
+        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
+            return TEAM_RUNS_2025[key]
+    return 4.2
 
 def get_pitcher_era(pitcher_name):
     if not pitcher_name or pitcher_name == 'TBD':
