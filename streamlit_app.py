@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.5 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.6 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -145,6 +145,98 @@ PARK_FACTORS = {
 }
 
 HOME_ADVANTAGE_RUNS = 0.20
+
+# ── Stadium weather stations ──────────────────────────────────────────────────
+# Maps home team to nearest weather station ID for Wethr.net API
+# Dome stadiums marked as None (weather irrelevant)
+STADIUM_WEATHER = {
+    "Arizona Diamondbacks":    None,        # Chase Field — retractable dome
+    "Atlanta Braves":          "KATL",      # Truist Park — Atlanta
+    "Baltimore Orioles":       "KBWI",      # Camden Yards — Baltimore
+    "Boston Red Sox":          "KBOS",      # Fenway Park — Boston
+    "Chicago Cubs":            "KORD",      # Wrigley Field — Chicago (open air)
+    "Chicago White Sox":       None,        # Guaranteed Rate — dome
+    "Cincinnati Reds":         "KLUK",      # Great American — Cincinnati
+    "Cleveland Guardians":     "KCLE",      # Progressive Field — Cleveland
+    "Colorado Rockies":        "KDEN",      # Coors Field — Denver
+    "Detroit Tigers":          "KDTW",      # Comerica Park — Detroit
+    "Houston Astros":          None,        # Minute Maid — retractable dome
+    "Kansas City Royals":      "KMCI",      # Kauffman Stadium — KC
+    "Los Angeles Angels":      "KSNA",      # Angel Stadium — Anaheim
+    "Los Angeles Dodgers":     "KLAX",      # Dodger Stadium — LA
+    "Miami Marlins":           None,        # loanDepot Park — dome
+    "Milwaukee Brewers":       None,        # American Family — retractable dome
+    "Minnesota Twins":         None,        # Target Field — open air but cold
+    "New York Mets":           "KJFK",      # Citi Field — NYC
+    "New York Yankees":        "KJFK",      # Yankee Stadium — NYC
+    "Oakland Athletics":       "KOAK",      # Athletics ballpark
+    "Athletics":               "KOAK",
+    "Philadelphia Phillies":   "KPHL",      # Citizens Bank Park
+    "Pittsburgh Pirates":      "KPIT",      # PNC Park
+    "San Diego Padres":        "KSAN",      # Petco Park
+    "San Francisco Giants":    "KSFO",      # Oracle Park
+    "Seattle Mariners":        None,        # T-Mobile Park — retractable dome
+    "St. Louis Cardinals":     "KSTL",      # Busch Stadium
+    "Tampa Bay Rays":          None,        # Tropicana Field — dome
+    "Texas Rangers":           None,        # Globe Life Field — retractable dome
+    "Toronto Blue Jays":       None,        # Rogers Centre — dome
+    "Washington Nationals":    "KDCA",      # Nationals Park
+}
+
+# Wind direction adjustment: degrees -> runs adjustment
+# Wind blowing OUT (toward outfield) increases scoring
+# Rough approximation: each mph of outfield wind = +0.05 runs
+def wind_run_adjustment(wind_speed_mph, wind_dir_deg, is_dome):
+    """
+    Returns run adjustment based on wind conditions.
+    Positive = more runs, negative = fewer runs.
+    """
+    if is_dome or wind_speed_mph is None:
+        return 0.0
+    # Simplified: wind > 10mph in any direction has meaningful impact
+    # Outfield wind (blowing out) ~ 0-180 degrees = positive
+    # Infield wind (blowing in) ~ 180-360 degrees = negative
+    if wind_speed_mph < 5:
+        return 0.0
+    # Normalize to +/- effect
+    import math
+    # Wind blowing out toward CF is roughly 0-180 degrees
+    out_factor = math.cos(math.radians(wind_dir_deg)) * -1  # -1 to 1
+    adjustment = out_factor * (wind_speed_mph / 10) * 0.3
+    return round(adjustment, 2)
+
+@st.cache_data(ttl=1800)  # Cache 30 min
+def fetch_stadium_weather(home_team):
+    """
+    Fetch current weather conditions for a stadium using Wethr.net API.
+    Returns dict with temp_f, wind_speed_mph, wind_dir_deg or None.
+    """
+    station = STADIUM_WEATHER.get(home_team)
+    if not station:
+        return {"dome": True}
+    try:
+        api_key = st.secrets.get("WETHR_API_KEY", "")
+        if not api_key:
+            return None
+        url = f"https://api.wethr.net/v1/current/{station}"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json"
+        }
+        resp = requests.get(url, headers=headers, timeout=8)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        return {
+            "dome": False,
+            "temp_f": data.get("temperature_f"),
+            "wind_speed_mph": data.get("wind_speed_mph"),
+            "wind_dir_deg": data.get("wind_direction_deg"),
+            "wind_dir_label": data.get("wind_direction", ""),
+            "station": station,
+        }
+    except Exception:
+        return None
 
 # ── Starting pitcher ERA (2025 season / 2026 projection) ─────────────────────
 PITCHER_ERA_2025 = {
@@ -387,7 +479,24 @@ def calc_model_total(away, home, away_pitcher, home_pitcher):
 
     park_factor = get_park_factor(home)
 
-    raw_total = base_total + away_sp_adj + home_sp_adj + away_bp_adj + home_bp_adj
+    # Weather adjustment
+    weather = fetch_stadium_weather(home)
+    if weather and not weather.get("dome"):
+        w_adj = wind_run_adjustment(
+            weather.get("wind_speed_mph"),
+            weather.get("wind_dir_deg", 0),
+            False
+        )
+        # Temperature adjustment: below 50F suppresses scoring
+        temp = weather.get("temp_f")
+        temp_adj = 0.0
+        if temp and temp < 50:
+            temp_adj = round((50 - temp) * -0.02, 2)  # -0.02 per degree below 50
+    else:
+        w_adj = 0.0
+        temp_adj = 0.0
+
+    raw_total = base_total + away_sp_adj + home_sp_adj + away_bp_adj + home_bp_adj + w_adj + temp_adj
     model_total = round(raw_total * park_factor, 1)
 
     return {
@@ -403,6 +512,9 @@ def calc_model_total(away, home, away_pitcher, home_pitcher):
         "away_bp_adj": away_bp_adj,
         "home_bp_adj": home_bp_adj,
         "park_factor": park_factor,
+        "weather": weather,
+        "wind_adj": w_adj,
+        "temp_adj": temp_adj,
         "model_total": model_total,
     }
 
@@ -870,6 +982,22 @@ with tab1:
                             st.metric("Home Advantage", f"+{HOME_ADVANTAGE_RUNS} R/G")
 
                         # Row 2: SP ERAs with recent form
+                        # Weather display
+                        weather = m.get("weather")
+                        if weather:
+                            if weather.get("dome"):
+                                st.info("🏟️ Dome stadium — weather not a factor")
+                            elif weather.get("temp_f"):
+                                w_speed = weather.get("wind_speed_mph", 0)
+                                w_dir = weather.get("wind_dir_label", "")
+                                temp = weather.get("temp_f")
+                                w_adj = m.get("wind_adj", 0)
+                                t_adj = m.get("temp_adj", 0)
+                                weather_str = f"🌡️ {temp}°F | 💨 {w_speed}mph {w_dir}"
+                                if w_adj != 0 or t_adj != 0:
+                                    weather_str += f" | Adj: {w_adj:+.2f} wind, {t_adj:+.2f} temp"
+                                st.info(weather_str)
+
                         col6, col7 = st.columns(2)
                         with col6:
                             away_era_label = f"Away SP ERA ({away_pitcher})"
