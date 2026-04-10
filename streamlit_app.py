@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.3 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.4 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -602,6 +602,64 @@ def fetch_kalshi_mlb_lines():
         return {"__error__": str(e)}
 
 
+@st.cache_data(ttl=300)
+def fetch_odds_api_lines():
+    """
+    Fetch MLB run total lines from The Odds API (Vegas consensus).
+    Returns dict keyed by (away_fragment, home_fragment) -> {total, over_price}
+    """
+    try:
+        api_key = st.secrets.get("ODDS_API_KEY", "")
+        if not api_key:
+            return {}
+        url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
+        params = {
+            "apiKey": api_key,
+            "regions": "us",
+            "markets": "totals",
+            "oddsFormat": "american",
+            "dateFormat": "iso",
+        }
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code != 200:
+            return {}
+        games = resp.json()
+        result = {}
+        for game in games:
+            away = game.get("away_team", "").lower()
+            home = game.get("home_team", "").lower()
+            bookmakers = game.get("bookmakers", [])
+            totals = []
+            for bm in bookmakers:
+                for market in bm.get("markets", []):
+                    if market.get("key") != "totals":
+                        continue
+                    for outcome in market.get("outcomes", []):
+                        if outcome.get("name") == "Over":
+                            totals.append({
+                                "total": outcome.get("point"),
+                                "odds": outcome.get("price"),
+                            })
+            if totals:
+                # Use median total across books
+                sorted_totals = sorted(totals, key=lambda x: x["total"])
+                median = sorted_totals[len(sorted_totals) // 2]
+                result[(away, home)] = {
+                    "total": median["total"],
+                    "over_odds": median["odds"],
+                }
+        return result
+    except Exception:
+        return {}
+
+def match_odds_line(away_name, home_name, odds_lines):
+    """Match a game to Odds API data by team name."""
+    for (k_away, k_home), data in odds_lines.items():
+        if k_away in away_name.lower() or away_name.lower() in k_away:
+            if k_home in home_name.lower() or home_name.lower() in k_home:
+                return data
+    return None
+
 def match_kalshi_line(away_name, home_name, kalshi_lines):
     """
     Find the Kalshi market for a given game by fuzzy team name matching.
@@ -729,6 +787,11 @@ with tab1:
                         _tier = "👍 LEAN"
 
                     _line_label = f"{_k_line} {'✅' if _has_kalshi else '~'}"
+                    
+                    # Vegas consensus line from Odds API
+                    _odds = match_odds_line(_away, _home, odds_lines)
+                    _vegas = f"{_odds['total']}" if _odds else "—"
+                    
                     summary_rows.append({
                         "Time": _et,
                         "Matchup": f"{_away} @ {_home}",
@@ -736,7 +799,8 @@ with tab1:
                         "Home SP": _hp if _hp != 'TBD' else '❓',
                         "Park": _pf_str,
                         "Model": _model,
-                        "Line": _line_label,
+                        "Kalshi": _line_label,
+                        "Vegas": _vegas,
                         "vs Line": ("🟢 " if _diff > 0.3 else "🔴 " if _diff < -0.3 else "⚪ ") + _diff_str,
                         "Lean": "🟢 OVER" if _lean == "OVER" else "🔴 UNDER" if _lean == "UNDER" else "⚪ EVEN",
                         "Edge": f"{_edge_pct}%",
@@ -747,10 +811,17 @@ with tab1:
 
             if summary_rows:
                 st.subheader("📋 Today's Slate")
-                if kalshi_caption_type == "success":
-                    st.success(kalshi_status)
-                else:
-                    st.warning(kalshi_status)
+                col_k, col_o = st.columns(2)
+                with col_k:
+                    if kalshi_caption_type == "success":
+                        st.success(kalshi_status)
+                    else:
+                        st.warning(kalshi_status)
+                with col_o:
+                    if odds_lines:
+                        st.success(odds_status)
+                    else:
+                        st.warning(odds_status)
                 st.dataframe(
                     pd.DataFrame(summary_rows),
                     use_container_width=True,
@@ -823,6 +894,11 @@ with tab1:
                                 delta=f"Adj: {m['home_bp_adj']:+.2f} runs")
 
                         st.metric("🎯 Model Run Total Estimate", model_total)
+
+                        # Vegas consensus line
+                        _game_odds = match_odds_line(away, home, odds_lines)
+                        if _game_odds:
+                            st.info(f"📊 Vegas consensus: {_game_odds['total']} | Over odds: {_game_odds['over_odds']}")
 
                         # Pre-fill from Kalshi feed if available
                         _game_kalshi = match_kalshi_line(away, home, kalshi_lines)
