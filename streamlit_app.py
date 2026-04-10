@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.6 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.7 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -215,7 +215,10 @@ def fetch_stadium_weather(home_team):
     if not station:
         return {"dome": True}
     try:
-        api_key = st.secrets.get("WETHR_API_KEY", "")
+        try:
+            api_key = st.secrets["WETHR_API_KEY"]
+        except:
+            api_key = st.secrets.get("WETHR_API_KEY", "")
         if not api_key:
             return None
         url = f"https://api.wethr.net/v1/current/{station}"
@@ -721,7 +724,10 @@ def fetch_odds_api_lines():
     Returns dict keyed by (away_fragment, home_fragment) -> {total, over_price}
     """
     try:
-        api_key = st.secrets.get("ODDS_API_KEY", "")
+        try:
+            api_key = st.secrets["ODDS_API_KEY"]
+        except:
+            api_key = st.secrets.get("ODDS_API_KEY", "")
         if not api_key:
             return {}
         url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
