@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.4 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.5 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -723,6 +723,8 @@ def get_kalshi_via_js():
 
 # Try server-side first, fall back to client-side approach
 kalshi_lines = fetch_kalshi_mlb_lines()
+odds_lines = fetch_odds_api_lines()
+odds_status = f"✅ Odds API: {len(odds_lines)} game(s)" if odds_lines else "⚠️ Odds API unavailable"
 _kalshi_error = kalshi_lines.pop("__error__", None) if kalshi_lines else None
 if kalshi_lines:
     kalshi_status = f"✅ Kalshi feed live: {len(kalshi_lines)} game(s) loaded"
