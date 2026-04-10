@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.8 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.9 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -515,9 +515,9 @@ def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
 def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=None):
     try:
         if game_id:
-            games = statsapi.schedule(game_id=int(game_id), sportId=1, hydrate='linescore')
+            games = statsapi.schedule(game_id=int(game_id), sportId=1)
         else:
-            games = statsapi.schedule(date=game_date, sportId=1, hydrate='linescore')
+            games = statsapi.schedule(date=game_date, sportId=1)
         if not games:
             return None
         for g in games:
