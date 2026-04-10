@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.10 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.11 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -32,27 +32,19 @@ except:
 
 def get_secret(key):
     """
-    Tries multiple access patterns for Streamlit Cloud top-level secrets.
-    Pattern 1: direct bracket access
-    Pattern 2: .get() method
-    Pattern 3: dict conversion
-    Returns empty string if all fail.
+    Reads from [api_keys] section first, then falls back to top-level.
+    Matches TOML structure: [api_keys] ODDS_API_KEY / WETHR_API_KEY
     """
+    # Pattern 1: sectioned [api_keys] -- preferred
+    try:
+        val = st.secrets["api_keys"][key]
+        if val:
+            return str(val)
+    except Exception:
+        pass
+    # Pattern 2: top-level bare key fallback
     try:
         val = st.secrets[key]
-        if val:
-            return str(val)
-    except Exception:
-        pass
-    try:
-        val = st.secrets.get(key, "")
-        if val:
-            return str(val)
-    except Exception:
-        pass
-    try:
-        d = dict(st.secrets)
-        val = d.get(key, "")
         if val:
             return str(val)
     except Exception:
