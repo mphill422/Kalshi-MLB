@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.9 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.10 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -27,6 +27,53 @@ try:
     supabase_connected = True
 except:
     supabase_connected = False
+
+# ── Defensive secrets helper ──────────────────────────────────────────────────
+
+def get_secret(key):
+    """
+    Tries multiple access patterns for Streamlit Cloud top-level secrets.
+    Pattern 1: direct bracket access
+    Pattern 2: .get() method
+    Pattern 3: dict conversion
+    Returns empty string if all fail.
+    """
+    try:
+        val = st.secrets[key]
+        if val:
+            return str(val)
+    except Exception:
+        pass
+    try:
+        val = st.secrets.get(key, "")
+        if val:
+            return str(val)
+    except Exception:
+        pass
+    try:
+        d = dict(st.secrets)
+        val = d.get(key, "")
+        if val:
+            return str(val)
+    except Exception:
+        pass
+    return ""
+
+# ── Sidebar debug panel ───────────────────────────────────────────────────────
+
+with st.sidebar:
+    st.markdown("### 🔧 System Status")
+    st.markdown(f"**Supabase:** {'✅ Connected' if supabase_connected else '❌ Not connected'}")
+    _odds_key = get_secret("ODDS_API_KEY")
+    _wethr_key = get_secret("WETHR_API_KEY")
+    st.markdown(f"**Odds API Key:** {'✅ Loaded' if _odds_key else '❌ Missing'}")
+    if _odds_key:
+        st.caption(f"Prefix: {_odds_key[:6]}…")
+    st.markdown(f"**Wethr API Key:** {'✅ Loaded' if _wethr_key else '❌ Missing'}")
+    if _wethr_key:
+        st.caption(f"Prefix: {_wethr_key[:6]}…")
+    st.markdown("---")
+    st.caption("If keys show ❌, check TOML formatting in Streamlit Cloud Secrets.")
 
 # ── Team offense (2025 full season RPG baseline) ──────────────────────────────
 
@@ -201,7 +248,7 @@ def fetch_stadium_weather(home_team):
     if not station:
         return {"dome": True}
     try:
-        api_key = st.secrets.get("WETHR_API_KEY", "")
+        api_key = get_secret("WETHR_API_KEY")
         if not api_key:
             return None
         url = f"https://api.wethr.net/v1/current/{station}"
@@ -510,8 +557,6 @@ def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
         st.error("Save error: " + str(e))
         return False
 
-# ── FIX 3: fetch_final_score — expanded status matching ──────────────────────
-
 def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=None):
     try:
         if game_id:
@@ -533,7 +578,6 @@ def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=No
                 if not (away_match and home_match):
                     continue
             status = g.get('status', '')
-            # FIX: substring match covers "Final", "Final: Tied", "Game Over", "Completed Early", etc.
             if not any(s.lower() in status.lower() for s in ['final', 'game over', 'completed']):
                 return None
             away_runs = g.get('away_score')
@@ -667,12 +711,10 @@ def fetch_kalshi_mlb_lines():
     except Exception as e:
         return {"**error**": str(e)}
 
-# ── FIX 1: Odds API — clean secrets access with visible error on failure ──────
-
 @st.cache_data(ttl=300)
 def fetch_odds_api_lines():
     try:
-        api_key = st.secrets.get("ODDS_API_KEY", "")
+        api_key = get_secret("ODDS_API_KEY")
         if not api_key:
             return {}
         url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
@@ -760,7 +802,6 @@ with tab1:
         if not schedule:
             st.warning("No games scheduled today.")
         else:
-            # ── Compact summary table ─────────────────────────────────────────
             summary_rows = []
             for g in schedule:
                 try:
@@ -841,7 +882,6 @@ with tab1:
                 )
                 st.markdown("---")
 
-            # ── Game expanders ────────────────────────────────────────────────
             for game in schedule:
                 try:
                     home = game['home_name']
@@ -878,7 +918,6 @@ with tab1:
                         with col5:
                             st.metric("Home Advantage", f"+{HOME_ADVANTAGE_RUNS} R/G")
 
-                        # ── FIX 2: Weather display — surface None and missing temp ──
                         weather = m.get("weather")
                         if weather is None:
                             st.warning("⚠️ Weather data unavailable for this stadium")
