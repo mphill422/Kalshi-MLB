@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.7 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.8 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -16,7 +16,7 @@ KELLY_FRACTION = 0.5
 MAX_BET_PCT = 0.05
 LEAGUE_AVG_ERA = 4.20
 LEAGUE_AVG_BULLPEN_ERA = 4.10
-SP_INNINGS = 5.0   # expected starter innings
+SP_INNINGS = 5.0
 TOTAL_INNINGS = 9.0
 
 try:
@@ -29,6 +29,7 @@ except:
     supabase_connected = False
 
 # ── Team offense (2025 full season RPG baseline) ──────────────────────────────
+
 TEAM_RUNS_2025 = {
     # AL East
     "New York Yankees": 4.7,
@@ -70,47 +71,49 @@ TEAM_RUNS_2025 = {
 }
 
 # ── Bullpen ERA by team (2025 full season) ────────────────────────────────────
+
 TEAM_BULLPEN_ERA = {
     # AL East
-    "New York Yankees": 3.20,   # Elite — Bednar, Holmes, Abreu
+    "New York Yankees": 3.20,
     "Boston Red Sox": 4.10,
     "Toronto Blue Jays": 3.85,
     "Baltimore Orioles": 3.95,
-    "Tampa Bay Rays": 3.50,     # Jax, strong pen
+    "Tampa Bay Rays": 3.50,
     # AL Central
     "Cleveland Guardians": 3.70,
     "Minnesota Twins": 4.00,
     "Detroit Tigers": 3.90,
-    "Kansas City Royals": 4.50, # Blown saves early 2026
-    "Chicago White Sox": 5.10,  # Weak pen
+    "Kansas City Royals": 4.50,
+    "Chicago White Sox": 5.10,
     # AL West
-    "Houston Astros": 3.40,     # Abreu, strong core
-    "Seattle Mariners": 3.72,   # Hader anchor
+    "Houston Astros": 3.40,
+    "Seattle Mariners": 3.72,
     "Texas Rangers": 4.20,
     "Los Angeles Angels": 4.60,
     "Oakland Athletics": 4.80,
     "Athletics": 4.80,
     # NL East
-    "New York Mets": 3.80,      # Diaz
+    "New York Mets": 3.80,
     "Philadelphia Phillies": 3.60,
     "Atlanta Braves": 3.90,
     "Washington Nationals": 4.40,
     "Miami Marlins": 4.30,
     # NL Central
     "Chicago Cubs": 4.10,
-    "Milwaukee Brewers": 3.30,  # Megill, Ashby — elite
+    "Milwaukee Brewers": 3.30,
     "St. Louis Cardinals": 4.20,
     "Pittsburgh Pirates": 4.00,
     "Cincinnati Reds": 4.30,
     # NL West
-    "Los Angeles Dodgers": 3.60, # Diaz signed, upgraded
-    "San Diego Padres": 3.20,    # Best pen in MLB 2025
+    "Los Angeles Dodgers": 3.60,
+    "San Diego Padres": 3.20,
     "Arizona Diamondbacks": 4.10,
     "San Francisco Giants": 4.00,
-    "Colorado Rockies": 5.20,    # Worst pen in baseball
+    "Colorado Rockies": 5.20,
 }
 
 # ── Park factors ──────────────────────────────────────────────────────────────
+
 PARK_FACTORS = {
     "Colorado Rockies":        1.15,
     "Cincinnati Reds":         1.07,
@@ -147,78 +150,58 @@ PARK_FACTORS = {
 HOME_ADVANTAGE_RUNS = 0.20
 
 # ── Stadium weather stations ──────────────────────────────────────────────────
-# Maps home team to nearest weather station ID for Wethr.net API
-# Dome stadiums marked as None (weather irrelevant)
+
 STADIUM_WEATHER = {
-    "Arizona Diamondbacks":    None,        # Chase Field — retractable dome
-    "Atlanta Braves":          "KATL",      # Truist Park — Atlanta
-    "Baltimore Orioles":       "KBWI",      # Camden Yards — Baltimore
-    "Boston Red Sox":          "KBOS",      # Fenway Park — Boston
-    "Chicago Cubs":            "KORD",      # Wrigley Field — Chicago (open air)
-    "Chicago White Sox":       None,        # Guaranteed Rate — dome
-    "Cincinnati Reds":         "KLUK",      # Great American — Cincinnati
-    "Cleveland Guardians":     "KCLE",      # Progressive Field — Cleveland
-    "Colorado Rockies":        "KDEN",      # Coors Field — Denver
-    "Detroit Tigers":          "KDTW",      # Comerica Park — Detroit
-    "Houston Astros":          None,        # Minute Maid — retractable dome
-    "Kansas City Royals":      "KMCI",      # Kauffman Stadium — KC
-    "Los Angeles Angels":      "KSNA",      # Angel Stadium — Anaheim
-    "Los Angeles Dodgers":     "KLAX",      # Dodger Stadium — LA
-    "Miami Marlins":           None,        # loanDepot Park — dome
-    "Milwaukee Brewers":       None,        # American Family — retractable dome
-    "Minnesota Twins":         None,        # Target Field — open air but cold
-    "New York Mets":           "KJFK",      # Citi Field — NYC
-    "New York Yankees":        "KJFK",      # Yankee Stadium — NYC
-    "Oakland Athletics":       "KOAK",      # Athletics ballpark
+    "Arizona Diamondbacks":    None,
+    "Atlanta Braves":          "KATL",
+    "Baltimore Orioles":       "KBWI",
+    "Boston Red Sox":          "KBOS",
+    "Chicago Cubs":            "KORD",
+    "Chicago White Sox":       None,
+    "Cincinnati Reds":         "KLUK",
+    "Cleveland Guardians":     "KCLE",
+    "Colorado Rockies":        "KDEN",
+    "Detroit Tigers":          "KDTW",
+    "Houston Astros":          None,
+    "Kansas City Royals":      "KMCI",
+    "Los Angeles Angels":      "KSNA",
+    "Los Angeles Dodgers":     "KLAX",
+    "Miami Marlins":           None,
+    "Milwaukee Brewers":       None,
+    "Minnesota Twins":         None,
+    "New York Mets":           "KJFK",
+    "New York Yankees":        "KJFK",
+    "Oakland Athletics":       "KOAK",
     "Athletics":               "KOAK",
-    "Philadelphia Phillies":   "KPHL",      # Citizens Bank Park
-    "Pittsburgh Pirates":      "KPIT",      # PNC Park
-    "San Diego Padres":        "KSAN",      # Petco Park
-    "San Francisco Giants":    "KSFO",      # Oracle Park
-    "Seattle Mariners":        None,        # T-Mobile Park — retractable dome
-    "St. Louis Cardinals":     "KSTL",      # Busch Stadium
-    "Tampa Bay Rays":          None,        # Tropicana Field — dome
-    "Texas Rangers":           None,        # Globe Life Field — retractable dome
-    "Toronto Blue Jays":       None,        # Rogers Centre — dome
-    "Washington Nationals":    "KDCA",      # Nationals Park
+    "Philadelphia Phillies":   "KPHL",
+    "Pittsburgh Pirates":      "KPIT",
+    "San Diego Padres":        "KSAN",
+    "San Francisco Giants":    "KSFO",
+    "Seattle Mariners":        None,
+    "St. Louis Cardinals":     "KSTL",
+    "Tampa Bay Rays":          None,
+    "Texas Rangers":           None,
+    "Toronto Blue Jays":       None,
+    "Washington Nationals":    "KDCA",
 }
 
-# Wind direction adjustment: degrees -> runs adjustment
-# Wind blowing OUT (toward outfield) increases scoring
-# Rough approximation: each mph of outfield wind = +0.05 runs
 def wind_run_adjustment(wind_speed_mph, wind_dir_deg, is_dome):
-    """
-    Returns run adjustment based on wind conditions.
-    Positive = more runs, negative = fewer runs.
-    """
     if is_dome or wind_speed_mph is None:
         return 0.0
-    # Simplified: wind > 10mph in any direction has meaningful impact
-    # Outfield wind (blowing out) ~ 0-180 degrees = positive
-    # Infield wind (blowing in) ~ 180-360 degrees = negative
     if wind_speed_mph < 5:
         return 0.0
-    # Normalize to +/- effect
     import math
-    # Wind blowing out toward CF is roughly 0-180 degrees
-    out_factor = math.cos(math.radians(wind_dir_deg)) * -1  # -1 to 1
+    out_factor = math.cos(math.radians(wind_dir_deg)) * -1
     adjustment = out_factor * (wind_speed_mph / 10) * 0.3
     return round(adjustment, 2)
 
-@st.cache_data(ttl=1800)  # Cache 30 min
+@st.cache_data(ttl=1800)
 def fetch_stadium_weather(home_team):
-    """
-    Fetch current weather conditions for a stadium using Wethr.net API.
-    Returns dict with temp_f, wind_speed_mph, wind_dir_deg or None.
-    """
     station = STADIUM_WEATHER.get(home_team)
     if not station:
         return {"dome": True}
     try:
-        try:
-            api_key = st.secrets["WETHR_API_KEY"]
-        except:
-            api_key = st.secrets.get("WETHR_API_KEY", "")
+        api_key = st.secrets.get("WETHR_API_KEY", "")
         if not api_key:
             return None
         url = f"https://api.wethr.net/v1/current/{station}"
@@ -241,9 +224,9 @@ def fetch_stadium_weather(home_team):
     except Exception:
         return None
 
-# ── Starting pitcher ERA (2025 season / 2026 projection) ─────────────────────
+# ── Starting pitcher ERA ──────────────────────────────────────────────────────
+
 PITCHER_ERA_2025 = {
-    # Elite tier
     "Paul Skenes": 1.96,
     "Tarik Skubal": 2.94,
     "Yoshinobu Yamamoto": 2.49,
@@ -267,7 +250,6 @@ PITCHER_ERA_2025 = {
     "Sonny Gray": 3.80,
     "Yu Darvish": 3.80,
     "Mitch Keller": 3.91,
-    # Mid tier
     "Jameson Taillon": 3.68,
     "Shane McClanahan": 3.86,
     "Roki Sasaki": 3.70,
@@ -299,7 +281,6 @@ PITCHER_ERA_2025 = {
     "Kyle Freeland": 4.65,
     "Cade Cavalli": 4.55,
     "Patrick Corbin": 5.20,
-    # 2026 names
     "Konnor Griffin": 3.90,
     "Simeon Woods Richardson": 4.40,
     "Jared Bubic": 4.50,
@@ -324,6 +305,7 @@ PITCHER_ERA_2025 = {
 }
 
 # ── Helper functions ──────────────────────────────────────────────────────────
+
 def get_park_factor(home_team):
     for key in PARK_FACTORS:
         if key.lower() in home_team.lower() or home_team.lower() in key.lower():
@@ -336,25 +318,18 @@ def get_bullpen_era(team_name):
             return TEAM_BULLPEN_ERA[key]
     return LEAGUE_AVG_BULLPEN_ERA
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+@st.cache_data(ttl=3600)
 def fetch_live_team_rpg():
-    """
-    Fetch real 2026 season runs per game from StatsAPI for all teams.
-    Falls back to TEAM_RUNS_2025 baseline if unavailable or <10 games played.
-    """
     try:
         standings = statsapi.standings_data(leagueId="103,104", season=datetime.today().year)
         team_stats = {}
-        
         for league in standings.values():
             for div in league.get('divisions', {}).values():
                 for team in div.get('teams', []):
                     team_name = team.get('name', '')
                     games = int(team.get('w', 0)) + int(team.get('l', 0))
                     if games < 5:
-                        continue  # Too early — not enough sample
-                    
-                    # Get team hitting stats
+                        continue
                     team_id = team.get('team_id')
                     if not team_id:
                         continue
@@ -379,15 +354,12 @@ def fetch_live_team_rpg():
     except Exception:
         return {}
 
-# Load live team RPG on startup (cached)
 _live_rpg = fetch_live_team_rpg()
 
 def get_team_rpg(team_name):
-    # Try live 2026 data first
     for key in _live_rpg:
         if key.lower() in team_name.lower() or team_name.lower() in key.lower():
             return _live_rpg[key]
-    # Fall back to 2025 baseline
     for key in TEAM_RUNS_2025:
         if key.lower() in team_name.lower() or team_name.lower() in key.lower():
             return TEAM_RUNS_2025[key]
@@ -402,10 +374,6 @@ def get_pitcher_era(pitcher_name):
     return LEAGUE_AVG_ERA
 
 def get_pitcher_recent_era(pitcher_name):
-    """
-    Fetch last 3 starts ERA from StatsAPI.
-    Returns recent ERA or None if unavailable.
-    """
     if not pitcher_name or pitcher_name == 'TBD':
         return None
     try:
@@ -413,8 +381,6 @@ def get_pitcher_recent_era(pitcher_name):
         if not results:
             return None
         player_id = results[0]['id']
-        end_date = datetime.today().strftime('%Y-%m-%d')
-        start_date = (datetime.today() - timedelta(days=45)).strftime('%Y-%m-%d')
         logs = statsapi.player_stat_data(
             player_id,
             group='pitching',
@@ -436,10 +402,6 @@ def get_pitcher_recent_era(pitcher_name):
         return None
 
 def blend_pitcher_era(pitcher_name):
-    """
-    Blend season ERA (70%) with last 3 starts ERA (30%).
-    Falls back to season ERA if recent data unavailable.
-    """
     season_era = get_pitcher_era(pitcher_name)
     recent_era = get_pitcher_recent_era(pitcher_name)
     if recent_era is None:
@@ -452,10 +414,6 @@ def era_adjustment(pitcher_era):
     return round(diff * 0.5, 2)
 
 def bullpen_adjustment(team_name):
-    """
-    Runs contributed by bullpen over expected ~4 innings.
-    Relative to league average bullpen.
-    """
     bp_era = get_bullpen_era(team_name)
     bp_innings = TOTAL_INNINGS - SP_INNINGS
     league_bp_runs = (LEAGUE_AVG_BULLPEN_ERA / 9) * bp_innings
@@ -463,9 +421,6 @@ def bullpen_adjustment(team_name):
     return round(team_bp_runs - league_bp_runs, 2)
 
 def calc_model_total(away, home, away_pitcher, home_pitcher):
-    """
-    Full model calculation. Returns dict of all components.
-    """
     away_rpg = get_team_rpg(away)
     home_rpg = get_team_rpg(home) + HOME_ADVANTAGE_RUNS
     base_total = round(away_rpg + home_rpg, 1)
@@ -476,13 +431,11 @@ def calc_model_total(away, home, away_pitcher, home_pitcher):
     away_sp_adj = era_adjustment(away_sp_era)
     home_sp_adj = era_adjustment(home_sp_era)
 
-    # Bullpen: away bullpen faces home offense, home bullpen faces away offense
     away_bp_adj = bullpen_adjustment(away)
     home_bp_adj = bullpen_adjustment(home)
 
     park_factor = get_park_factor(home)
 
-    # Weather adjustment
     weather = fetch_stadium_weather(home)
     if weather and not weather.get("dome"):
         w_adj = wind_run_adjustment(
@@ -490,11 +443,10 @@ def calc_model_total(away, home, away_pitcher, home_pitcher):
             weather.get("wind_dir_deg", 0),
             False
         )
-        # Temperature adjustment: below 50F suppresses scoring
         temp = weather.get("temp_f")
         temp_adj = 0.0
         if temp and temp < 50:
-            temp_adj = round((50 - temp) * -0.02, 2)  # -0.02 per degree below 50
+            temp_adj = round((50 - temp) * -0.02, 2)
     else:
         w_adj = 0.0
         temp_adj = 0.0
@@ -558,6 +510,8 @@ def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
         st.error("Save error: " + str(e))
         return False
 
+# ── FIX 3: fetch_final_score — expanded status matching ──────────────────────
+
 def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=None):
     try:
         if game_id:
@@ -579,7 +533,8 @@ def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=No
                 if not (away_match and home_match):
                     continue
             status = g.get('status', '')
-            if status not in ('Final', 'Game Over', 'Completed Early'):
+            # FIX: substring match covers "Final", "Final: Tied", "Game Over", "Completed Early", etc.
+            if not any(s.lower() in status.lower() for s in ['final', 'game over', 'completed']):
                 return None
             away_runs = g.get('away_score')
             home_runs = g.get('home_score')
@@ -587,7 +542,8 @@ def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=No
                 return None
             return int(away_runs), int(home_runs), int(away_runs) + int(home_runs)
         return None
-    except Exception:
+    except Exception as e:
+        st.warning(f"Settlement fetch error (game_id={game_id}): {e}")
         return None
 
 def settle_result(actual_total, kalshi_line, bet_direction, bet_amount, kalshi_over_price):
@@ -623,7 +579,7 @@ def run_auto_settlement():
     settled_count = 0
     skipped_count = 0
     progress = st.empty()
-    progress.info(f"⏳ Auto-settling {len(rows)} unsettled bet(s)...")
+    progress.info(f"⏳ Auto-settling {len(rows)} unsettled bet(s)…")
     for row in rows:
         row_id = row.get("id")
         game_id = row.get("game_id")
@@ -668,9 +624,8 @@ def run_auto_settlement():
     else:
         progress.empty()
 
-
 # ── Kalshi MLB market feed ────────────────────────────────────────────────────
-# Team abbreviation map: Kalshi 3-letter code → full team name fragment
+
 KALSHI_TEAM_MAP = {
     "NYY": "Yankees", "BOS": "Red Sox", "TOR": "Blue Jays",
     "BAL": "Orioles", "TBR": "Rays",    "TAM": "Rays",
@@ -686,14 +641,10 @@ KALSHI_TEAM_MAP = {
     "ARI": "Diamondbacks", "SFG": "Giants", "COL": "Rockies",
 }
 
-@st.cache_data(ttl=60)  # 1 min cache so fresh data shows quickly
+@st.cache_data(ttl=60)
 def fetch_kalshi_mlb_lines():
-    """
-    Read Kalshi MLB lines from Supabase kalshi_lines table.
-    Table is populated by the fetch-kalshi-lines Edge Function.
-    """
     if not supabase_connected:
-        return {"__error__": "Supabase not connected"}
+        return {"**error**": "Supabase not connected"}
     try:
         today = datetime.today().strftime('%Y-%m-%d')
         resp = supabase.table("kalshi_lines").select("*").eq("game_date", today).execute()
@@ -711,26 +662,20 @@ def fetch_kalshi_mlb_lines():
                 "title": "",
             }
         if not result:
-            return {"__error__": f"No lines in table for {today} — trigger Edge Function"}
+            return {"**error**": f"No lines in table for {today} — trigger Edge Function"}
         return result
     except Exception as e:
-        return {"__error__": str(e)}
+        return {"**error**": str(e)}
 
+# ── FIX 1: Odds API — clean secrets access with visible error on failure ──────
 
 @st.cache_data(ttl=300)
 def fetch_odds_api_lines():
-    """
-    Fetch MLB run total lines from The Odds API (Vegas consensus).
-    Returns dict keyed by (away_fragment, home_fragment) -> {total, over_price}
-    """
     try:
-        try:
-            api_key = st.secrets["ODDS_API_KEY"]
-        except:
-            api_key = st.secrets.get("ODDS_API_KEY", "")
+        api_key = st.secrets.get("ODDS_API_KEY", "")
         if not api_key:
             return {}
-        url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
+        url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
         params = {
             "apiKey": api_key,
             "regions": "us",
@@ -740,6 +685,7 @@ def fetch_odds_api_lines():
         }
         resp = requests.get(url, params=params, timeout=10)
         if resp.status_code != 200:
+            st.warning(f"⚠️ Odds API returned HTTP {resp.status_code}")
             return {}
         games = resp.json()
         result = {}
@@ -759,7 +705,6 @@ def fetch_odds_api_lines():
                                 "odds": outcome.get("price"),
                             })
             if totals:
-                # Use median total across books
                 sorted_totals = sorted(totals, key=lambda x: x["total"])
                 median = sorted_totals[len(sorted_totals) // 2]
                 result[(away, home)] = {
@@ -767,11 +712,11 @@ def fetch_odds_api_lines():
                     "over_odds": median["odds"],
                 }
         return result
-    except Exception:
+    except Exception as e:
+        st.warning(f"⚠️ Odds API error: {e}")
         return {}
 
 def match_odds_line(away_name, home_name, odds_lines):
-    """Match a game to Odds API data by team name."""
     for (k_away, k_home), data in odds_lines.items():
         if k_away in away_name.lower() or away_name.lower() in k_away:
             if k_home in home_name.lower() or home_name.lower() in k_home:
@@ -779,10 +724,6 @@ def match_odds_line(away_name, home_name, odds_lines):
     return None
 
 def match_kalshi_line(away_name, home_name, kalshi_lines):
-    """
-    Find the Kalshi market for a given game by fuzzy team name matching.
-    Returns {line, over_price_cents} or None.
-    """
     for (k_away, k_home), data in kalshi_lines.items():
         if k_away in away_name.lower() or away_name.lower() in k_away:
             if k_home in home_name.lower() or home_name.lower() in k_home:
@@ -790,60 +731,15 @@ def match_kalshi_line(away_name, home_name, kalshi_lines):
     return None
 
 # ── Auto-settlement on load ───────────────────────────────────────────────────
+
 run_auto_settlement()
 
-# ── Fetch Kalshi lines via browser-side JS component ─────────────────────────
-import json as _json
+# ── Fetch lines ───────────────────────────────────────────────────────────────
 
-def get_kalshi_via_js():
-    """
-    Injects a JS fetch call that runs in the user browser (not Streamlit server).
-    Browser has no network restrictions. Returns data via Streamlit component.
-    """
-    kalshi_js = """
-    <script>
-    async function fetchKalshi() {
-        try {
-            const url = "https://api.elections.kalshi.com/trade-api/v2/markets?series_ticker=KXMLBGAME&status=open&limit=200";
-            const resp = await fetch(url, {
-                method: "GET",
-                headers: {
-                    "Content-Type": "application/json",
-                }
-            });
-            const data = await resp.json();
-            const markets = data.markets || [];
-            
-            // Send to Streamlit via query param trick
-            const result = JSON.stringify(markets);
-            const encoded = encodeURIComponent(result);
-            
-            // Store in sessionStorage so Streamlit can read it
-            sessionStorage.setItem('kalshi_markets', result);
-            document.getElementById('kalshi-status').innerText = 'loaded:' + markets.length;
-        } catch(e) {
-            document.getElementById('kalshi-status').innerText = 'error:' + e.message;
-        }
-    }
-    
-    // Check if already loaded this session
-    const cached = sessionStorage.getItem('kalshi_markets');
-    if (cached) {
-        document.getElementById('kalshi-status').innerText = 'cached:' + JSON.parse(cached).length;
-    } else {
-        fetchKalshi();
-    }
-    </script>
-    <div id="kalshi-status" style="display:none">loading</div>
-    """
-    result = st.components.v1.html(kalshi_js, height=0)
-    return result
-
-# Try server-side first, fall back to client-side approach
 kalshi_lines = fetch_kalshi_mlb_lines()
 odds_lines = fetch_odds_api_lines()
 odds_status = f"✅ Odds API: {len(odds_lines)} game(s)" if odds_lines else "⚠️ Odds API unavailable"
-_kalshi_error = kalshi_lines.pop("__error__", None) if kalshi_lines else None
+_kalshi_error = kalshi_lines.pop("**error**", None) if kalshi_lines else None
 if kalshi_lines:
     kalshi_status = f"✅ Kalshi feed live: {len(kalshi_lines)} game(s) loaded"
     kalshi_caption_type = "success"
@@ -853,6 +749,7 @@ else:
     kalshi_caption_type = "warning"
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
+
 tab1, tab2 = st.tabs(["Today's Games", "Settlement Tracker"])
 
 with tab1:
@@ -877,7 +774,6 @@ with tab1:
                     _model = m["model_total"]
                     _pf = m["park_factor"]
                     _pf_str = f"{_pf:.2f} {'🏔️' if _pf >= 1.04 else '⬆️' if _pf > 1.0 else '➡️' if _pf == 1.0 else '⬇️'}"
-                    # Use real Kalshi line if available, else 8.5 default
                     _kalshi = match_kalshi_line(_away, _home, kalshi_lines)
                     _k_line = _kalshi["line"] if _kalshi else 8.5
                     _k_price = _kalshi["over_price_cents"] if _kalshi else 50
@@ -887,7 +783,6 @@ with tab1:
                     _lean = "OVER" if _diff > 0.3 else "UNDER" if _diff < -0.3 else "EVEN"
                     _diff_str = f"{_diff:+.1f}"
 
-                    # Real edge vs actual Kalshi market
                     _model_prob = model_to_probability(_model, _k_line) / 100
                     if _lean == "OVER":
                         _real_edge = _model_prob - (_k_price / 100)
@@ -896,7 +791,6 @@ with tab1:
                     _edge_pct = round(abs(_real_edge) * 100, 1)
                     _has_edge = _real_edge >= EDGE_THRESHOLD
 
-                    # Confidence tier
                     if not _has_edge:
                         _tier = "⚪ NO EDGE"
                     elif _edge_pct >= 12:
@@ -907,11 +801,9 @@ with tab1:
                         _tier = "👍 LEAN"
 
                     _line_label = f"{_k_line} {'✅' if _has_kalshi else '~'}"
-                    
-                    # Vegas consensus line from Odds API
                     _odds = match_odds_line(_away, _home, odds_lines)
                     _vegas = f"{_odds['total']}" if _odds else "—"
-                    
+
                     summary_rows.append({
                         "Time": _et,
                         "Matchup": f"{_away} @ {_home}",
@@ -976,7 +868,6 @@ with tab1:
 
                         st.markdown("---")
 
-                        # Row 1: Base total + park factor + home adv
                         col3, col4, col5 = st.columns(3)
                         with col3:
                             st.metric("Base Total", m["base_total"])
@@ -987,22 +878,25 @@ with tab1:
                         with col5:
                             st.metric("Home Advantage", f"+{HOME_ADVANTAGE_RUNS} R/G")
 
-                        # Row 2: SP ERAs with recent form
-                        # Weather display
+                        # ── FIX 2: Weather display — surface None and missing temp ──
                         weather = m.get("weather")
-                        if weather:
-                            if weather.get("dome"):
-                                st.info("🏟️ Dome stadium — weather not a factor")
-                            elif weather.get("temp_f"):
-                                w_speed = weather.get("wind_speed_mph", 0)
-                                w_dir = weather.get("wind_dir_label", "")
-                                temp = weather.get("temp_f")
-                                w_adj = m.get("wind_adj", 0)
-                                t_adj = m.get("temp_adj", 0)
+                        if weather is None:
+                            st.warning("⚠️ Weather data unavailable for this stadium")
+                        elif weather.get("dome"):
+                            st.info("🏟️ Dome stadium — weather not a factor")
+                        else:
+                            temp = weather.get("temp_f")
+                            w_speed = weather.get("wind_speed_mph", 0)
+                            w_dir = weather.get("wind_dir_label", "")
+                            w_adj = m.get("wind_adj", 0)
+                            t_adj = m.get("temp_adj", 0)
+                            if temp is not None:
                                 weather_str = f"🌡️ {temp}°F | 💨 {w_speed}mph {w_dir}"
                                 if w_adj != 0 or t_adj != 0:
                                     weather_str += f" | Adj: {w_adj:+.2f} wind, {t_adj:+.2f} temp"
                                 st.info(weather_str)
+                            else:
+                                st.warning(f"⚠️ Weather station {weather.get('station', '?')} returned no temp data")
 
                         col6, col7 = st.columns(2)
                         with col6:
@@ -1018,7 +912,6 @@ with tab1:
                             delta_str = f"Recent: {home_recent}" if home_recent else "Season only"
                             st.metric(home_era_label, home_era_display, delta=delta_str)
 
-                        # Row 3: Bullpen ERAs
                         col8, col9 = st.columns(2)
                         with col8:
                             st.metric(f"Away Bullpen ERA ({away})",
@@ -1031,12 +924,10 @@ with tab1:
 
                         st.metric("🎯 Model Run Total Estimate", model_total)
 
-                        # Vegas consensus line
                         _game_odds = match_odds_line(away, home, odds_lines)
                         if _game_odds:
                             st.info(f"📊 Vegas consensus: {_game_odds['total']} | Over odds: {_game_odds['over_odds']}")
 
-                        # Pre-fill from Kalshi feed if available
                         _game_kalshi = match_kalshi_line(away, home, kalshi_lines)
                         _default_line = float(_game_kalshi["line"]) if _game_kalshi else 8.5
                         _default_price = int(_game_kalshi["over_price_cents"]) if _game_kalshi else 50
