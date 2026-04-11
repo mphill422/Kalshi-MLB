@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.14 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.15 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -456,7 +456,6 @@ def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=No
             return int(ar), int(hr), int(ar) + int(hr)
         return None
     except Exception as e:
-        st.warning(f"Settlement fetch error (game_id={game_id}): {e}")
         return None
 
 def settle_result(actual_total, kalshi_line, bet_direction, bet_amount, kalshi_over_price):
@@ -561,7 +560,6 @@ def fetch_odds_lines():
                 result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
         return result
     except Exception as e:
-        st.warning(f"⚠️ Odds API: {e}")
         return {}
 
 def match_kalshi(away, home, lines, mtype="full"):
@@ -647,9 +645,15 @@ with tab1:
                 st.subheader("📋 Today's Slate")
                 c1, c2 = st.columns(2)
                 with c1:
-                    st.success(kalshi_status) if kalshi_lines else st.warning(kalshi_status)
+                    if kalshi_lines:
+                        st.success(kalshi_status)
+                    else:
+                        st.warning(kalshi_status)
                 with c2:
-                    st.success(odds_status) if odds_lines else st.warning(odds_status)
+                    if odds_lines:
+                        st.success(odds_status)
+                    else:
+                        st.warning(odds_status)
                 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
                 st.markdown("---")
 
