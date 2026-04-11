@@ -997,38 +997,34 @@ with tab1:
                     _ap_abbr = abbrev_pitcher(_ap)
                     _hp_abbr = abbrev_pitcher(_hp)
 
-                    # Two stacked rows per game for mobile
-                    # Row 1: F5 with team/pitcher info
+                    _vegas_str = f"{_odds['total']}" if _odds else "—"
+                    # Row 1: F5 — team/pitcher info, no Vegas (Vegas is full game only)
                     rows.append({
                         "Time": _et,
                         "Matchup": f"{_away_abbr}@{_home_abbr}",
-                        "SPs": f"{_ap_abbr}/{_hp_abbr}",
                         "Mkt": "F5",
                         "Model": _f5["total"],
                         "Line": f"{_f5_line}{'✅' if _k5 else '~'}",
                         "Signal": f"{_f5_dir} {_f5_signal}",
+                        "Vegas": "—",
                         # Desktop extras
                         "Away SP": _ap if _ap != "TBD" else "❓",
                         "Home SP": _hp if _hp != "TBD" else "❓",
                         "Park": _pf_str,
-                        "Vegas": f"{_odds['total']}" if _odds else "—",
-                        "_sort": _et + "_1",
                     })
-                    # Row 2: FG — no team/pitcher repeated
+                    # Row 2: FG — blank team/pitcher, Vegas shown here
                     rows.append({
                         "Time": "",
                         "Matchup": "",
-                        "SPs": "",
                         "Mkt": "FG",
                         "Model": _fg["total"],
                         "Line": f"{_fg_line}{'✅' if _kf else '~'}",
                         "Signal": f"{_fg_dir} {_fg_signal}",
+                        "Vegas": _vegas_str,
                         # Desktop extras
                         "Away SP": "",
                         "Home SP": "",
                         "Park": "",
-                        "Vegas": f"{_odds['total']}" if _odds else "—",
-                        "_sort": _et + "_2",
                     })
                 except Exception:
                     continue
@@ -1053,7 +1049,7 @@ with tab1:
 
                 df_all = pd.DataFrame(rows)
                 if view_type == "📱 Mobile":
-                    mobile_cols = ["Time", "Matchup", "SPs", "Mkt", "Model", "Line", "Signal"]
+                    mobile_cols = ["Time", "Matchup", "Mkt", "Model", "Line", "Signal"]
                     st.dataframe(df_all[mobile_cols], use_container_width=True, hide_index=True)
                 else:
                     desktop_cols = ["Time", "Matchup", "Away SP", "Home SP", "Park",
