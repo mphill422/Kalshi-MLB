@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.17 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.18 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -745,6 +745,39 @@ with tab1:
                     _pf_str = f"{_pf:.2f} {'🏔️' if _pf>=1.04 else '⬆️' if _pf>1.0 else '➡️' if _pf==1.0 else '⬇️'}"
                     _f5d = round(_f5["total"] - _f5_line, 1)
                     _fgd = round(_fg["total"] - _fg_line, 1)
+
+                    # F5 signal tier
+                    _k5_price = _k5["over_price_cents"] if _k5 else 50
+                    _f5_prob = model_to_prob(_f5["total"], _f5_line) / 100
+                    _f5_lean = "OVER" if _f5d > 0.3 else "UNDER" if _f5d < -0.3 else "EVEN"
+                    _f5_edge = (_f5_prob - _k5_price/100) if _f5_lean == "OVER" else ((1-_f5_prob) - (1-_k5_price/100)) if _f5_lean == "UNDER" else 0
+                    _f5_edge_pct = round(abs(_f5_edge) * 100, 1)
+                    if _f5_lean == "EVEN" or _f5_edge < EDGE_THRESHOLD:
+                        _f5_signal = "⚪ NO EDGE"
+                    elif _f5_edge_pct >= 12:
+                        _f5_signal = "🔥 HIGH"
+                    elif _f5_edge_pct >= 8:
+                        _f5_signal = "💪 STRONG"
+                    else:
+                        _f5_signal = "👍 LEAN"
+                    _f5_dir = "🟢 OVER" if _f5_lean == "OVER" else "🔴 UNDER" if _f5_lean == "UNDER" else "⚪"
+
+                    # FG signal tier
+                    _kf_price = _kf["over_price_cents"] if _kf else 50
+                    _fg_prob = model_to_prob(_fg["total"], _fg_line) / 100
+                    _fg_lean = "OVER" if _fgd > 0.3 else "UNDER" if _fgd < -0.3 else "EVEN"
+                    _fg_edge = (_fg_prob - _kf_price/100) if _fg_lean == "OVER" else ((1-_fg_prob) - (1-_kf_price/100)) if _fg_lean == "UNDER" else 0
+                    _fg_edge_pct = round(abs(_fg_edge) * 100, 1)
+                    if _fg_lean == "EVEN" or _fg_edge < EDGE_THRESHOLD:
+                        _fg_signal = "⚪ NO EDGE"
+                    elif _fg_edge_pct >= 12:
+                        _fg_signal = "🔥 HIGH"
+                    elif _fg_edge_pct >= 8:
+                        _fg_signal = "💪 STRONG"
+                    else:
+                        _fg_signal = "👍 LEAN"
+                    _fg_dir = "🟢 OVER" if _fg_lean == "OVER" else "🔴 UNDER" if _fg_lean == "UNDER" else "⚪"
+
                     rows.append({
                         "Time": _et,
                         "Matchup": f"{_away} @ {_home}",
@@ -753,11 +786,11 @@ with tab1:
                         "Park": _pf_str,
                         "F5 Model": _f5["total"],
                         "F5 Line": f"{_f5_line}{'✅' if _k5 else '~'}",
-                        "F5 vs": ("🟢 " if _f5d > 0.3 else "🔴 " if _f5d < -0.3 else "⚪ ") + f"{_f5d:+.1f}",
+                        "F5 Signal": f"{_f5_dir} {_f5_signal}",
                         "FG Model": _fg["total"],
                         "FG Line": f"{_fg_line}{'✅' if _kf else '~'}",
                         "Vegas": f"{_odds['total']}" if _odds else "—",
-                        "FG vs": ("🟢 " if _fgd > 0.3 else "🔴 " if _fgd < -0.3 else "⚪ ") + f"{_fgd:+.1f}",
+                        "FG Signal": f"{_fg_dir} {_fg_signal}",
                     })
                 except Exception:
                     continue
