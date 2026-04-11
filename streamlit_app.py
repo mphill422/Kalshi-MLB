@@ -39,18 +39,27 @@ details { border: 1px solid #2a2d3a !important; border-radius: 10px !important;
 .stButton > button {
     border-radius: 8px !important; font-weight: 600 !important;
     border: 1px solid #00d4ff !important; color: #00d4ff !important;
-    background: transparent !important;
+    background: transparent !important; width: 100% !important;
 }
 .stButton > button:hover { background: #00d4ff22 !important; }
 
 /* ── Success/info boxes ── */
 .stSuccess { border-radius: 8px !important; }
 .stInfo    { border-radius: 8px !important; }
+
+/* ── Mobile optimization ── */
+@media (max-width: 768px) {
+    h1 { font-size: 1.4rem !important; }
+    .stMetric { padding: 8px !important; }
+    div[data-testid="metric-container"] { padding: 8px !important; }
+    .stDataFrame { font-size: 0.75rem !important; }
+    details summary { font-size: 0.9rem !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("# ⚾ Kalshi MLB Model")
-st.caption("Version 4.19 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.20 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -849,6 +858,11 @@ with tab1:
                         "FG Line": f"{_fg_line}{'✅' if _kf else '~'}",
                         "Vegas": f"{_odds['total']}" if _odds else "—",
                         "FG Signal": f"{_fg_dir} {_fg_signal}",
+                        # Mobile-only compact fields
+                        "🕐": _et,
+                        "Game": f"{_away.split()[-1]} @ {_home.split()[-1]}",
+                        "F5": f"{_f5_dir} {_f5_signal}",
+                        "FG": f"{_fg_dir} {_fg_signal}",
                     })
                 except Exception:
                     continue
@@ -866,7 +880,20 @@ with tab1:
                         st.success(odds_status)
                     else:
                         st.warning(odds_status)
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+                # Mobile vs desktop view toggle
+                view_type = st.radio("Table view", ["📱 Mobile", "🖥️ Desktop"],
+                                     horizontal=True, label_visibility="collapsed")
+
+                df_all = pd.DataFrame(rows)
+                if view_type == "📱 Mobile":
+                    mobile_cols = ["🕐", "Game", "F5", "FG"]
+                    st.dataframe(df_all[mobile_cols], use_container_width=True, hide_index=True)
+                else:
+                    desktop_cols = ["Time", "Matchup", "Away SP", "Home SP", "Park",
+                                    "F5 Model", "F5 Line", "F5 Signal",
+                                    "FG Model", "FG Line", "Vegas", "FG Signal"]
+                    st.dataframe(df_all[desktop_cols], use_container_width=True, hide_index=True)
                 st.markdown("---")
 
             # Game expanders
@@ -885,51 +912,44 @@ with tab1:
                     fg = calc_fg(away, home, ap, hp, pf, wx)
 
                     with st.expander(f"**{away} @ {home}** — {et}"):
-                        # Header
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.markdown(f"**Away:** {away}")
-                            src = '🟢 Live' if f5['away_src'] == 'live' else '🟡 Fallback'
-                            st.caption(f"SP: {ap} | ERA: {f5['away_era']} {src}")
-                        with c2:
-                            st.markdown(f"**Home:** {home}")
-                            src = '🟢 Live' if f5['home_src'] == 'live' else '🟡 Fallback'
-                            st.caption(f"SP: {hp} | ERA: {f5['home_era']} {src}")
+                        # ── Pitchers & ERA (always single line on mobile) ──────
+                        away_src = '🟢' if f5['away_src'] == 'live' else '🟡'
+                        home_src = '🟢' if f5['home_src'] == 'live' else '🟡'
+                        away_line = f"**Away:** {away} | SP: {ap} | ERA: {f5['away_era']} {away_src}"
+                        home_line = f"**Home:** {home} | SP: {hp} | ERA: {f5['home_era']} {home_src}"
+                        st.markdown(away_line + "  \n" + home_line)
 
-                        # Park + weather row
-                        c3, c4, c5 = st.columns(3)
-                        with c3:
-                            st.metric("🏟️ Park", pf,
-                                      delta='Hitter' if pf > 1.0 else 'Pitcher' if pf < 1.0 else 'Neutral')
-                        with c4:
-                            if wx is None:
-                                st.warning("⚠️ Weather unavailable")
-                            elif wx.get("dome"):
-                                st.info("🏟️ Dome")
-                            else:
-                                temp = wx.get("temp_f")
-                                st.metric("🌡️ Temp", f"{temp}°F" if temp else "N/A")
-                        with c5:
-                            if wx and not wx.get("dome"):
-                                ws = wx.get("wind_speed_mph", 0)
-                                wd = wx.get("wind_dir_label", "")
-                                w_label = fg.get("wind_label") or f5.get("wind_label")
-                                wind_str = f"{ws}mph {wd}" if ws else "Calm"
-                                st.metric("💨 Wind", wind_str, delta=w_label if w_label else None)
+                        # Park + weather — 2 cols on mobile, 3 on desktop
+                        if wx is None:
+                            wx_str = "⚠️ Weather unavailable"
+                        elif wx.get("dome"):
+                            wx_str = "🏟️ Dome — weather N/A"
+                        else:
+                            temp = wx.get("temp_f")
+                            ws = wx.get("wind_speed_mph", 0)
+                            wd = wx.get("wind_dir_label", "")
+                            w_label = fg.get("wind_label") or f5.get("wind_label") or ""
+                            wx_str = f"🌡️ {temp}°F | 💨 {ws}mph {wd} {w_label}" if temp else "⚠️ No temp data"
+
+                        cA, cB = st.columns(2)
+                        with cA:
+                            park_label = 'Hitter' if pf > 1.0 else 'Pitcher' if pf < 1.0 else 'Neutral'
+                            st.metric("🏟️ Park", pf, delta=park_label)
+                        with cB:
+                            st.info(wx_str)
 
                         st.markdown("---")
 
                         # ── FIRST 5 INNINGS ───────────────────────────────────
                         st.markdown("### ⚾ First 5 Innings")
-                        c6, c7, c8 = st.columns(3)
-                        with c6:
+                        cF1, cF2 = st.columns(2)
+                        with cF1:
                             st.metric("F5 Model", f5["total"])
-                        with c7:
+                        with cF2:
                             st.metric(f"Away ERA ({ap})", f5["away_era"],
                                       delta=f"Recent: {f5['away_recent']}" if f5["away_recent"] else "Season only")
-                        with c8:
-                            st.metric(f"Home ERA ({hp})", f5["home_era"],
-                                      delta=f"Recent: {f5['home_recent']}" if f5["home_recent"] else "Season only")
+                        st.metric(f"Home ERA ({hp})", f5["home_era"],
+                                  delta=f"Recent: {f5['home_recent']}" if f5["home_recent"] else "Season only")
 
                         _k5 = match_kalshi(away, home, kalshi_lines, "f5")
                         _f5_line = float(_k5["line"]) if _k5 else 4.5
@@ -948,15 +968,14 @@ with tab1:
 
                         # ── FULL GAME ─────────────────────────────────────────
                         st.markdown("### 🏟️ Full Game")
-                        c9, c10, c11 = st.columns(3)
-                        with c9:
+                        cG1, cG2 = st.columns(2)
+                        with cG1:
                             st.metric("FG Model", fg["total"])
-                        with c10:
-                            st.metric(f"Away Bullpen ({away})", fg["away_bp_era"],
+                        with cG2:
+                            st.metric(f"Away Bullpen", fg["away_bp_era"],
                                       delta=f"Adj: {fg['away_bp_adj']:+.2f}")
-                        with c11:
-                            st.metric(f"Home Bullpen ({home})", fg["home_bp_era"],
-                                      delta=f"Adj: {fg['home_bp_adj']:+.2f}")
+                        st.metric(f"Home Bullpen", fg["home_bp_era"],
+                                  delta=f"Adj: {fg['home_bp_adj']:+.2f}")
 
                         _kf = match_kalshi(away, home, kalshi_lines, "full")
                         _fg_line = float(_kf["line"]) if _kf else 8.5
