@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.12 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.13 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -46,18 +46,7 @@ def get_secret(key):
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
-with st.sidebar:
-    st.markdown("### 🔧 System Status")
-    st.markdown(f"**Supabase:** {'✅ Connected' if supabase_connected else '❌ Not connected'}")
-    _odds_key = get_secret("ODDS_API_KEY")
-    _wethr_key = get_secret("WETHR_API_KEY")
-    st.markdown(f"**Odds API Key:** {'✅ Loaded' if _odds_key else '❌ Missing'}")
-    if _odds_key:
-        st.caption(f"Prefix: {_odds_key[:6]}…")
-    st.markdown(f"**Wethr API Key:** {'✅ Loaded' if _wethr_key else '❌ Missing'}")
-    if _wethr_key:
-        st.caption(f"Prefix: {_wethr_key[:6]}…")
-    st.markdown("---")
+# Sidebar rendered after live stats load (see below)
 
 # ── Static data ───────────────────────────────────────────────────────────────
 
@@ -269,7 +258,19 @@ def fetch_stadium_weather(home_team):
 # Load live team stats
 _live_rpg, _live_bullpen = fetch_live_team_stats()
 
+# ── Single consolidated sidebar ───────────────────────────────────────────────
 with st.sidebar:
+    st.markdown("### 🔧 System Status")
+    st.markdown(f"**Supabase:** {'✅ Connected' if supabase_connected else '❌ Not connected'}")
+    _odds_key = get_secret("ODDS_API_KEY")
+    _wethr_key = get_secret("WETHR_API_KEY")
+    st.markdown(f"**Odds API Key:** {'✅ Loaded' if _odds_key else '❌ Missing'}")
+    if _odds_key:
+        st.caption(f"Prefix: {_odds_key[:6]}…")
+    st.markdown(f"**Wethr API Key:** {'✅ Loaded' if _wethr_key else '❌ Missing'}")
+    if _wethr_key:
+        st.caption(f"Prefix: {_wethr_key[:6]}…")
+    st.markdown("---")
     rpg_count = len(_live_rpg)
     bp_count = len(_live_bullpen)
     st.markdown(f"**Live RPG:** {'✅' if rpg_count >= 20 else '⚠️'} {rpg_count} teams")
