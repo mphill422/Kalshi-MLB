@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.15 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.16 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -66,18 +66,39 @@ PARK_FACTORS = {
 HOME_ADVANTAGE_RUNS = 0.20
 HOME_ADVANTAGE_F5 = 0.10
 
-STADIUM_WEATHER = {
-    "Arizona Diamondbacks": None, "Atlanta Braves": "KATL", "Baltimore Orioles": "KBWI",
-    "Boston Red Sox": "KBOS", "Chicago Cubs": "KORD", "Chicago White Sox": None,
-    "Cincinnati Reds": "KLUK", "Cleveland Guardians": "KCLE", "Colorado Rockies": "KDEN",
-    "Detroit Tigers": "KDTW", "Houston Astros": None, "Kansas City Royals": "KMCI",
-    "Los Angeles Angels": "KSNA", "Los Angeles Dodgers": "KLAX", "Miami Marlins": None,
-    "Milwaukee Brewers": None, "Minnesota Twins": None, "New York Mets": "KJFK",
-    "New York Yankees": "KJFK", "Oakland Athletics": "KOAK", "Athletics": "KOAK",
-    "Philadelphia Phillies": "KPHL", "Pittsburgh Pirates": "KPIT", "San Diego Padres": "KSAN",
-    "San Francisco Giants": "KSFO", "Seattle Mariners": None, "St. Louis Cardinals": "KSTL",
-    "Tampa Bay Rays": None, "Texas Rangers": None, "Toronto Blue Jays": None,
-    "Washington Nationals": "KDCA",
+# ── Stadium coordinates (lat, lon) — None = dome ─────────────────────────────
+STADIUM_COORDS = {
+    "Arizona Diamondbacks":  None,                    # Chase Field — dome
+    "Atlanta Braves":        (33.8908, -84.4678),     # Truist Park
+    "Baltimore Orioles":     (39.2838, -76.6216),     # Camden Yards
+    "Boston Red Sox":        (42.3467, -71.0972),     # Fenway Park
+    "Chicago Cubs":          (41.9484, -87.6553),     # Wrigley Field
+    "Chicago White Sox":     None,                    # Guaranteed Rate — dome
+    "Cincinnati Reds":       (39.0979, -84.5082),     # Great American Ball Park
+    "Cleveland Guardians":   (41.4962, -81.6852),     # Progressive Field
+    "Colorado Rockies":      (39.7559, -104.9942),    # Coors Field
+    "Detroit Tigers":        (42.3390, -83.0485),     # Comerica Park
+    "Houston Astros":        None,                    # Minute Maid — dome
+    "Kansas City Royals":    (39.0517, -94.4803),     # Kauffman Stadium
+    "Los Angeles Angels":    (33.8003, -117.8827),    # Angel Stadium
+    "Los Angeles Dodgers":   (34.0739, -118.2400),    # Dodger Stadium
+    "Miami Marlins":         None,                    # loanDepot Park — dome
+    "Milwaukee Brewers":     None,                    # American Family — dome
+    "Minnesota Twins":       (44.9817, -93.2778),     # Target Field (open air)
+    "New York Mets":         (40.7571, -73.8458),     # Citi Field
+    "New York Yankees":      (40.8296, -73.9262),     # Yankee Stadium
+    "Oakland Athletics":     (38.5803, -121.4994),    # Sutter Health Park
+    "Athletics":             (38.5803, -121.4994),
+    "Philadelphia Phillies": (39.9061, -75.1665),     # Citizens Bank Park
+    "Pittsburgh Pirates":    (40.4469, -80.0057),     # PNC Park
+    "San Diego Padres":      (32.7073, -117.1566),    # Petco Park
+    "San Francisco Giants":  (37.7786, -122.3893),    # Oracle Park
+    "Seattle Mariners":      None,                    # T-Mobile Park — dome
+    "St. Louis Cardinals":   (38.6226, -90.1928),     # Busch Stadium
+    "Tampa Bay Rays":        None,                    # Tropicana — dome
+    "Texas Rangers":         None,                    # Globe Life — dome
+    "Toronto Blue Jays":     None,                    # Rogers Centre — dome
+    "Washington Nationals":  (38.8730, -77.0074),     # Nationals Park
 }
 
 PITCHER_ERA_FALLBACK = {
@@ -227,33 +248,80 @@ def fetch_recent_era(pitcher_name):
     except Exception:
         return None
 
+WIND_DIR_LABELS = {
+    0: "N", 23: "NNE", 45: "NE", 68: "ENE", 90: "E", 113: "ESE",
+    135: "SE", 158: "SSE", 180: "S", 203: "SSW", 225: "SW", 248: "WSW",
+    270: "W", 293: "WNW", 315: "NW", 338: "NNW", 360: "N"
+}
+
+def deg_to_label(deg):
+    if deg is None:
+        return ""
+    closest = min(WIND_DIR_LABELS.keys(), key=lambda x: abs(x - deg))
+    return WIND_DIR_LABELS[closest]
+
 @st.cache_data(ttl=1800)
-def fetch_stadium_weather(home_team):
-    station = STADIUM_WEATHER.get(home_team)
-    if not station:
+def fetch_stadium_weather(home_team, game_hour_utc=None):
+    """
+    Fetch weather from Open-Meteo (free, no API key).
+    Uses stadium lat/lon. If game_hour_utc provided, fetches forecast for that hour.
+    Returns dict with temp_f, wind_speed_mph, wind_dir_deg, wind_dir_label, dome.
+    """
+    coords = STADIUM_COORDS.get(home_team)
+    if coords is None:
         return {"dome": True}
-    api_key = get_secret("WETHR_API_KEY")
-    if not api_key:
+    lat, lon = coords
+    try:
+        # Request hourly forecast for today
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": "temperature_2m,windspeed_10m,winddirection_10m",
+            "temperature_unit": "fahrenheit",
+            "windspeed_unit": "mph",
+            "forecast_days": 1,
+            "timezone": "auto",
+        }
+        resp = requests.get(url, params=params, timeout=8)
+        if resp.status_code != 200:
+            return None
+        d = resp.json()
+        hourly = d.get("hourly", {})
+        times = hourly.get("time", [])
+        temps = hourly.get("temperature_2m", [])
+        wspeeds = hourly.get("windspeed_10m", [])
+        wdirs = hourly.get("winddirection_10m", [])
+
+        if not times:
+            return None
+
+        # Pick the hour closest to game time, or current hour
+        target_hour = game_hour_utc if game_hour_utc else datetime.utcnow().hour
+        # Find best matching index
+        best_idx = 0
+        for i, t in enumerate(times):
+            try:
+                h = int(t.split("T")[1][:2])
+                if h <= target_hour:
+                    best_idx = i
+            except Exception:
+                continue
+
+        temp = temps[best_idx] if temps else None
+        wspeed = wspeeds[best_idx] if wspeeds else 0
+        wdir = wdirs[best_idx] if wdirs else 0
+
+        return {
+            "dome": False,
+            "temp_f": round(temp, 1) if temp else None,
+            "wind_speed_mph": round(wspeed, 1) if wspeed else 0,
+            "wind_dir_deg": round(wdir) if wdir else 0,
+            "wind_dir_label": deg_to_label(wdir),
+            "source": "Open-Meteo",
+        }
+    except Exception:
         return None
-    endpoints = [
-        (f"https://api.wethr.net/v1/current/{station}", {"Authorization": f"Bearer {api_key}"}),
-        (f"https://api.wethr.net/v1/observations/{station}", {"X-API-Key": api_key}),
-        (f"https://api.wethr.net/current/{station}", {"Authorization": f"Bearer {api_key}"}),
-    ]
-    for url, headers in endpoints:
-        try:
-            resp = requests.get(url, headers={**headers, "Accept": "application/json"}, timeout=8)
-            if resp.status_code == 200:
-                d = resp.json()
-                temp = d.get("temperature_f") or d.get("temp_f") or d.get("temperature") or d.get("temp")
-                wspeed = d.get("wind_speed_mph") or d.get("wind_speed") or d.get("windSpeed") or 0
-                wdir_deg = d.get("wind_direction_deg") or d.get("wind_dir_deg") or d.get("windDirection") or 0
-                wdir_label = d.get("wind_direction") or d.get("windDirectionLabel") or ""
-                return {"dome": False, "temp_f": temp, "wind_speed_mph": wspeed,
-                        "wind_dir_deg": wdir_deg, "wind_dir_label": wdir_label, "station": station}
-        except Exception:
-            continue
-    return None
 
 # Load live team stats
 _live_rpg, _live_bullpen = fetch_live_team_stats()
@@ -263,13 +331,10 @@ with st.sidebar:
     st.markdown("### 🔧 System Status")
     st.markdown(f"**Supabase:** {'✅ Connected' if supabase_connected else '❌ Not connected'}")
     _odds_key = get_secret("ODDS_API_KEY")
-    _wethr_key = get_secret("WETHR_API_KEY")
     st.markdown(f"**Odds API Key:** {'✅ Loaded' if _odds_key else '❌ Missing'}")
     if _odds_key:
         st.caption(f"Prefix: {_odds_key[:6]}…")
-    st.markdown(f"**Wethr API Key:** {'✅ Loaded' if _wethr_key else '❌ Missing'}")
-    if _wethr_key:
-        st.caption(f"Prefix: {_wethr_key[:6]}…")
+    st.markdown("**Weather:** ✅ Open-Meteo (free, no key)")
     st.markdown("---")
     rpg_count = len(_live_rpg)
     bp_count = len(_live_bullpen)
@@ -613,7 +678,8 @@ with tab1:
                     _et = (datetime.strptime(g['game_datetime'], '%Y-%m-%dT%H:%M:%SZ')
                            - timedelta(hours=4)).strftime('%I:%M %p')
                     _pf = get_park_factor(_home)
-                    _wx = fetch_stadium_weather(_home)
+                    _game_utc_hour = datetime.strptime(g['game_datetime'], '%Y-%m-%dT%H:%M:%SZ').hour
+                    _wx = fetch_stadium_weather(_home, game_hour_utc=_game_utc_hour)
                     _f5 = calc_f5(_away, _home, _ap, _hp, _pf, _wx)
                     _fg = calc_fg(_away, _home, _ap, _hp, _pf, _wx)
                     _kf = match_kalshi(_away, _home, kalshi_lines, "full")
@@ -667,7 +733,8 @@ with tab1:
                           - timedelta(hours=4)).strftime('%I:%M %p ET')
                     game_id = str(game['game_id'])
                     pf = get_park_factor(home)
-                    wx = fetch_stadium_weather(home)
+                    _g_utc_hour = datetime.strptime(game['game_datetime'], '%Y-%m-%dT%H:%M:%SZ').hour
+                    wx = fetch_stadium_weather(home, game_hour_utc=_g_utc_hour)
                     f5 = calc_f5(away, home, ap, hp, pf, wx)
                     fg = calc_fg(away, home, ap, hp, pf, wx)
 
