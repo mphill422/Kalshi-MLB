@@ -6,60 +6,194 @@ import requests
 from datetime import datetime, timedelta
 from supabase import create_client
 
-st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
+st.set_page_config(page_title="MPH MLB Model", layout="wide", page_icon="⚾")
 
 st.markdown("""
 <style>
-/* ── Global ── */
-body, .stApp { background-color: #0e1117; }
-h1 { font-size: 2rem !important; font-weight: 800 !important; 
-     background: linear-gradient(90deg, #00d4ff, #00ff88);
-     -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
 
-/* ── Signal badges ── */
-.badge-high   { background:#ff4b4b; color:white; padding:3px 10px; border-radius:12px; font-weight:700; font-size:0.8rem; }
-.badge-strong { background:#ff9900; color:white; padding:3px 10px; border-radius:12px; font-weight:700; font-size:0.8rem; }
-.badge-lean   { background:#00cc88; color:white; padding:3px 10px; border-radius:12px; font-weight:700; font-size:0.8rem; }
-.badge-none   { background:#333; color:#888; padding:3px 10px; border-radius:12px; font-size:0.8rem; }
+/* ── Base ── */
+html, body, .stApp {
+    background-color: #080c14 !important;
+    font-family: 'Inter', sans-serif !important;
+}
 
-/* ── Table styling ── */
-.stDataFrame { border-radius: 10px; overflow: hidden; }
+/* ── Top header bar ── */
+.mph-header {
+    background: linear-gradient(135deg, #0d1f3c 0%, #0a1628 100%);
+    border-bottom: 2px solid #1e90ff33;
+    padding: 18px 24px 14px 24px;
+    margin: -1rem -1rem 1.5rem -1rem;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.mph-title {
+    font-size: 1.6rem; font-weight: 800; letter-spacing: -0.5px;
+    color: #ffffff;
+}
+.mph-title span { color: #1e90ff; }
+.mph-badge {
+    background: #1e90ff18; border: 1px solid #1e90ff44;
+    color: #1e90ff; font-size: 0.7rem; font-weight: 700;
+    padding: 3px 10px; border-radius: 20px; letter-spacing: 1px;
+    text-transform: uppercase;
+}
+.mph-sub {
+    color: #4a6080; font-size: 0.8rem; margin-top: 2px;
+}
+
+/* ── Section headers ── */
+.section-header {
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: #1e90ff;
+    border-bottom: 1px solid #1e90ff22; padding-bottom: 6px;
+    margin: 1.2rem 0 0.8rem 0;
+}
 
 /* ── Metric cards ── */
 div[data-testid="metric-container"] {
-    background: #1a1d27; border-radius: 10px; padding: 12px;
-    border: 1px solid #2a2d3a;
+    background: #0d1a2d !important;
+    border: 1px solid #1e3a5f !important;
+    border-radius: 8px !important;
+    padding: 10px 14px !important;
+    transition: border-color 0.2s;
+}
+div[data-testid="metric-container"]:hover {
+    border-color: #1e90ff66 !important;
+}
+div[data-testid="metric-container"] label {
+    color: #4a6080 !important; font-size: 0.7rem !important;
+    text-transform: uppercase; letter-spacing: 1px;
+}
+div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+    color: #e8f0fe !important; font-size: 1.4rem !important; font-weight: 700 !important;
 }
 
-/* ── Expander styling ── */
-details { border: 1px solid #2a2d3a !important; border-radius: 10px !important; 
-          background: #1a1d27 !important; margin-bottom: 6px !important; }
+/* ── Expanders ── */
+details {
+    background: #0d1a2d !important;
+    border: 1px solid #1e3a5f !important;
+    border-radius: 8px !important;
+    margin-bottom: 6px !important;
+    transition: border-color 0.2s;
+}
+details:hover { border-color: #1e90ff55 !important; }
+details summary {
+    font-weight: 600 !important; color: #c8d8f0 !important;
+    padding: 10px 14px !important;
+}
+details[open] { border-color: #1e90ff55 !important; }
 
-/* ── Button styling ── */
+/* ── Signal colors ── */
+.sig-fire   { color: #ff6b35; font-weight: 700; }
+.sig-strong { color: #ffd700; font-weight: 700; }
+.sig-lean   { color: #00cc88; font-weight: 700; }
+.sig-none   { color: #3a4a60; }
+
+/* ── Divider ── */
+.mph-divider {
+    border: none; border-top: 1px solid #1e3a5f;
+    margin: 1rem 0;
+}
+
+/* ── Buttons ── */
 .stButton > button {
-    border-radius: 8px !important; font-weight: 600 !important;
-    border: 1px solid #00d4ff !important; color: #00d4ff !important;
-    background: transparent !important; width: 100% !important;
+    background: #0d1a2d !important;
+    border: 1px solid #1e90ff55 !important;
+    color: #1e90ff !important;
+    border-radius: 6px !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    width: 100% !important;
+    transition: all 0.2s !important;
 }
-.stButton > button:hover { background: #00d4ff22 !important; }
+.stButton > button:hover {
+    background: #1e90ff15 !important;
+    border-color: #1e90ff !important;
+}
 
-/* ── Success/info boxes ── */
-.stSuccess { border-radius: 8px !important; }
-.stInfo    { border-radius: 8px !important; }
+/* ── Status pills ── */
+.pill-live {
+    display: inline-block;
+    background: #00cc8822; border: 1px solid #00cc8866;
+    color: #00cc88; font-size: 0.65rem; font-weight: 700;
+    padding: 2px 8px; border-radius: 20px; letter-spacing: 1px;
+    text-transform: uppercase; margin-left: 8px;
+}
+.pill-warn {
+    display: inline-block;
+    background: #ff990022; border: 1px solid #ff990066;
+    color: #ff9900; font-size: 0.65rem; font-weight: 700;
+    padding: 2px 8px; border-radius: 20px; letter-spacing: 1px;
+    text-transform: uppercase; margin-left: 8px;
+}
 
-/* ── Mobile optimization ── */
+/* ── Success/Warning/Info ── */
+div[data-testid="stAlert"] {
+    border-radius: 6px !important;
+    font-size: 0.85rem !important;
+}
+
+/* ── Table ── */
+.stDataFrame {
+    border-radius: 8px !important;
+    border: 1px solid #1e3a5f !important;
+    overflow: hidden !important;
+}
+
+/* ── Sidebar ── */
+section[data-testid="stSidebar"] {
+    background: #080c14 !important;
+    border-right: 1px solid #1e3a5f !important;
+}
+section[data-testid="stSidebar"] .stMarkdown {
+    font-size: 0.85rem !important;
+}
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: #0d1a2d !important;
+    border-radius: 8px !important;
+    padding: 4px !important;
+    gap: 4px !important;
+}
+.stTabs [data-baseweb="tab"] {
+    color: #4a6080 !important;
+    font-weight: 600 !important;
+    border-radius: 6px !important;
+}
+.stTabs [aria-selected="true"] {
+    background: #1e90ff22 !important;
+    color: #1e90ff !important;
+}
+
+/* ── Mobile ── */
 @media (max-width: 768px) {
-    h1 { font-size: 1.4rem !important; }
-    .stMetric { padding: 8px !important; }
-    div[data-testid="metric-container"] { padding: 8px !important; }
-    .stDataFrame { font-size: 0.75rem !important; }
-    details summary { font-size: 0.9rem !important; }
+    .mph-title { font-size: 1.2rem !important; }
+    div[data-testid="metric-container"] { padding: 8px 10px !important; }
+    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+        font-size: 1.1rem !important;
+    }
+    .stDataFrame { font-size: 0.72rem !important; }
+    details summary { font-size: 0.85rem !important; padding: 8px 12px !important; }
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("# ⚾ Kalshi MLB Model")
-st.caption("Version 4.20 - " + datetime.today().strftime('%B %d, %Y'))
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown(f"""
+<div class="mph-header">
+  <div>
+    <div class="mph-title">⚾ MPH <span>MLB</span> Model</div>
+    <div class="mph-sub">Run Totals · First 5 Innings · Full Game &nbsp;
+      <span class="pill-live">● LIVE</span>
+    </div>
+  </div>
+  <div style="text-align:right">
+    <div class="mph-badge">V4.21</div>
+    <div class="mph-sub" style="margin-top:4px">{datetime.today().strftime('%b %d, %Y')}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -407,7 +541,7 @@ _live_rpg, _live_bullpen = fetch_live_team_stats()
 
 # ── Single consolidated sidebar ───────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 🔧 System Status")
+    st.markdown('<div class="section-header">System Status</div>', unsafe_allow_html=True)
     st.markdown(f"**Supabase:** {'✅ Connected' if supabase_connected else '❌ Not connected'}")
     _odds_key = get_secret("ODDS_API_KEY")
     st.markdown(f"**Odds API Key:** {'✅ Loaded' if _odds_key else '❌ Missing'}")
@@ -868,7 +1002,7 @@ with tab1:
                     continue
 
             if rows:
-                st.subheader("📋 Today's Slate")
+                st.markdown("<div class='section-header'>📋 Today's Slate</div>", unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
                 with c1:
                     if kalshi_lines:
@@ -938,10 +1072,10 @@ with tab1:
                         with cB:
                             st.info(wx_str)
 
-                        st.markdown("---")
+                        st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
 
                         # ── FIRST 5 INNINGS ───────────────────────────────────
-                        st.markdown("### ⚾ First 5 Innings")
+                        st.markdown('<div class="section-header">⚾ First 5 Innings</div>', unsafe_allow_html=True)
                         cF1, cF2 = st.columns(2)
                         with cF1:
                             st.metric("F5 Model", f5["total"])
@@ -964,10 +1098,10 @@ with tab1:
                         signal_boxes(f5["total"], f5_line_in, f5_price_in, game_id,
                                      "F5", away, home, ap, hp, "f5", today)
 
-                        st.markdown("---")
+                        st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
 
                         # ── FULL GAME ─────────────────────────────────────────
-                        st.markdown("### 🏟️ Full Game")
+                        st.markdown('<div class="section-header">🏟️ Full Game</div>', unsafe_allow_html=True)
                         cG1, cG2 = st.columns(2)
                         with cG1:
                             st.metric("FG Model", fg["total"])
@@ -1001,7 +1135,7 @@ with tab1:
         st.error(f"Error: {e}")
 
 with tab2:
-    st.subheader("📊 Settlement Tracker")
+    st.markdown('<div class="section-header">📊 Settlement Tracker</div>', unsafe_allow_html=True)
     if supabase_connected:
         try:
             data = supabase.table("mlb_settlements").select("*").order("game_date", desc=True).execute()
@@ -1042,7 +1176,7 @@ with tab2:
                         m3.metric("Win %", f"{wp}%")
                         m4.metric("Total P&L", f"${pnl:+.2f}")
                         m5.metric("Unsettled", len(df[df["result"].isna()]))
-                        st.markdown("---")
+                        st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
 
                     # ── Display columns ───────────────────────────────────────
                     base_cols = ["game_date", "away_team", "home_team", "market_type",
