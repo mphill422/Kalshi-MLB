@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.16 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.17 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -65,6 +65,34 @@ PARK_FACTORS = {
 
 HOME_ADVANTAGE_RUNS = 0.20
 HOME_ADVANTAGE_F5 = 0.10
+
+# ── Stadium center field orientation — degrees from home plate toward CF ────
+# Wind blowing FROM this direction = blowing OUT (increases scoring)
+# Wind blowing TOWARD this direction = blowing IN (suppresses scoring)
+STADIUM_CF_BEARING = {
+    "Atlanta Braves":        22,    # Truist Park — CF faces NNE
+    "Baltimore Orioles":     90,    # Camden Yards — CF faces E
+    "Boston Red Sox":        95,    # Fenway Park — CF faces roughly E
+    "Chicago Cubs":          180,   # Wrigley Field — CF faces S
+    "Cincinnati Reds":       355,   # Great American — CF faces N
+    "Cleveland Guardians":   225,   # Progressive Field — CF faces SW
+    "Colorado Rockies":      292,   # Coors Field — CF faces WNW
+    "Detroit Tigers":        352,   # Comerica Park — CF faces N
+    "Kansas City Royals":    30,    # Kauffman — CF faces NNE
+    "Los Angeles Angels":    225,   # Angel Stadium — CF faces SW
+    "Los Angeles Dodgers":   315,   # Dodger Stadium — CF faces NW
+    "Minnesota Twins":       105,   # Target Field — CF faces ESE
+    "New York Mets":         355,   # Citi Field — CF faces N
+    "New York Yankees":      225,   # Yankee Stadium — CF faces SW
+    "Oakland Athletics":     225,   # Sutter Health — CF faces SW
+    "Athletics":             225,
+    "Philadelphia Phillies": 55,    # Citizens Bank — CF faces NE
+    "Pittsburgh Pirates":    125,   # PNC Park — CF faces SE
+    "San Diego Padres":      315,   # Petco Park — CF faces NW
+    "San Francisco Giants":  115,   # Oracle Park — CF faces ESE
+    "St. Louis Cardinals":   105,   # Busch Stadium — CF faces ESE
+    "Washington Nationals":  45,    # Nationals Park — CF faces NE
+}
 
 # ── Stadium coordinates (lat, lon) — None = dome ─────────────────────────────
 STADIUM_COORDS = {
@@ -375,21 +403,48 @@ def blend_era(pitcher_name):
         return season_era, None, src
     return round(season_era * 0.70 + recent * 0.30, 2), recent, src
 
-def weather_adjs(weather, scale=1.0):
+def wind_out_factor(wind_dir_deg, home_team):
+    """
+    Returns a factor from -1.0 to +1.0:
+      +1.0 = pure out (blowing toward outfield = more runs)
+      -1.0 = pure in (blowing toward home plate = fewer runs)
+       0.0 = pure crosswind (no effect)
+    Uses stadium CF bearing to determine actual wind effect.
+    """
+    import math
+    cf_bearing = STADIUM_CF_BEARING.get(home_team)
+    if cf_bearing is None:
+        return 0.0  # Unknown orientation — no adjustment
+    # Wind direction: meteorological convention = direction wind is coming FROM
+    # Wind blowing FROM cf_bearing = blowing IN (suppresses scoring)
+    # Wind blowing FROM opposite of cf_bearing = blowing OUT (increases scoring)
+    # Angle between wind source and CF direction
+    angle = (wind_dir_deg - cf_bearing + 180) % 360 - 180
+    # cos(angle): +1 when wind blows directly out, -1 when directly in
+    return round(math.cos(math.radians(angle)), 3)
+
+def weather_adjs(weather, home_team, scale=1.0):
     if not weather or weather.get("dome"):
-        return 0.0, 0.0
+        return 0.0, 0.0, None
     import math
     wspeed = weather.get("wind_speed_mph") or 0
     wdir = weather.get("wind_dir_deg") or 0
     w_adj = 0.0
+    w_label = None
     if wspeed and wspeed >= 5:
-        out_factor = math.cos(math.radians(wdir)) * -1
-        w_adj = round(out_factor * (wspeed / 10) * 0.3 * scale, 2)
+        factor = wind_out_factor(wdir, home_team)
+        w_adj = round(factor * (wspeed / 10) * 0.3 * scale, 2)
+        if factor > 0.3:
+            w_label = "🌬️ Blowing OUT"
+        elif factor < -0.3:
+            w_label = "🌬️ Blowing IN"
+        else:
+            w_label = "💨 Crosswind"
     temp = weather.get("temp_f")
     t_adj = 0.0
     if temp and temp < 50:
         t_adj = round((50 - temp) * -0.02 * scale, 2)
-    return w_adj, t_adj
+    return w_adj, t_adj, w_label
 
 def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather):
     away_rpg = get_team_rpg(away) * (F5_INNINGS / TOTAL_INNINGS)
@@ -399,14 +454,14 @@ def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather):
     home_era, home_recent, home_src = blend_era(home_pitcher)
     away_sp_adj = round(((away_era - LEAGUE_AVG_ERA) / 9) * F5_INNINGS * 0.5, 2)
     home_sp_adj = round(((home_era - LEAGUE_AVG_ERA) / 9) * F5_INNINGS * 0.5, 2)
-    w_adj, t_adj = weather_adjs(weather, scale=F5_INNINGS / TOTAL_INNINGS)
+    w_adj, t_adj, w_label = weather_adjs(weather, home, scale=F5_INNINGS / TOTAL_INNINGS)
     raw = base + away_sp_adj + home_sp_adj + w_adj + t_adj
     return {
         "total": round(raw * pf, 1), "base": base,
         "away_era": away_era, "away_recent": away_recent, "away_src": away_src,
         "home_era": home_era, "home_recent": home_recent, "home_src": home_src,
         "away_sp_adj": away_sp_adj, "home_sp_adj": home_sp_adj,
-        "wind_adj": w_adj, "temp_adj": t_adj,
+        "wind_adj": w_adj, "temp_adj": t_adj, "wind_label": w_label,
     }
 
 def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather):
@@ -422,7 +477,7 @@ def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather):
     bp_inn = TOTAL_INNINGS - SP_INNINGS
     away_bp_adj = round(((away_bp_era - LEAGUE_AVG_BULLPEN_ERA) / 9) * bp_inn, 2)
     home_bp_adj = round(((home_bp_era - LEAGUE_AVG_BULLPEN_ERA) / 9) * bp_inn, 2)
-    w_adj, t_adj = weather_adjs(weather, scale=1.0)
+    w_adj, t_adj, w_label = weather_adjs(weather, home, scale=1.0)
     raw = base + away_sp_adj + home_sp_adj + away_bp_adj + home_bp_adj + w_adj + t_adj
     return {
         "total": round(raw * pf, 1), "base": base,
@@ -431,7 +486,7 @@ def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather):
         "away_sp_adj": away_sp_adj, "home_sp_adj": home_sp_adj,
         "away_bp_era": away_bp_era, "home_bp_era": home_bp_era,
         "away_bp_adj": away_bp_adj, "home_bp_adj": home_bp_adj,
-        "wind_adj": w_adj, "temp_adj": t_adj,
+        "wind_adj": w_adj, "temp_adj": t_adj, "wind_label": w_label,
     }
 
 def model_to_prob(model_total, line):
@@ -767,7 +822,9 @@ with tab1:
                             if wx and not wx.get("dome"):
                                 ws = wx.get("wind_speed_mph", 0)
                                 wd = wx.get("wind_dir_label", "")
-                                st.metric("💨 Wind", f"{ws}mph {wd}" if ws else "Calm")
+                                w_label = fg.get("wind_label") or f5.get("wind_label")
+                                wind_str = f"{ws}mph {wd}" if ws else "Calm"
+                                st.metric("💨 Wind", wind_str, delta=w_label if w_label else None)
 
                         st.markdown("---")
 
