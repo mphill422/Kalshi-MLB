@@ -8,7 +8,7 @@ from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
 st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.13 - " + datetime.today().strftime('%B %d, %Y'))
+st.caption("Version 4.14 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -470,19 +470,17 @@ def settle_result(actual_total, kalshi_line, bet_direction, bet_amount, kalshi_o
 
 def run_auto_settlement():
     if not supabase_connected:
-        return
+        return None
     today_str = datetime.today().strftime('%Y-%m-%d')
     try:
         resp = supabase.table("mlb_settlements").select("*") \
             .is_("actual_total", "null").lt("game_date", today_str).execute()
     except Exception:
-        return
+        return None
     rows = resp.data or []
     if not rows:
-        return
+        return None
     settled, skipped = 0, 0
-    progress = st.empty()
-    progress.info(f"⏳ Auto-settling {len(rows)} unsettled bet(s)…")
     for row in rows:
         score = fetch_final_score(game_id=row.get("game_id"), game_date=row.get("game_date"),
                                    away_team=row.get("away_team"), home_team=row.get("home_team"))
@@ -504,7 +502,7 @@ def run_auto_settlement():
     msg = f"✅ Auto-settlement: {settled} settled"
     if skipped:
         msg += f", {skipped} skipped"
-    progress.success(msg) if settled or skipped else progress.empty()
+    return msg
 
 # ── Kalshi line fetchers ──────────────────────────────────────────────────────
 
@@ -582,7 +580,7 @@ def match_odds(away, home, lines):
 
 # ── App startup ───────────────────────────────────────────────────────────────
 
-run_auto_settlement()
+_settlement_msg = run_auto_settlement()
 
 kalshi_lines = fetch_kalshi_lines()
 odds_lines = fetch_odds_lines()
@@ -599,6 +597,8 @@ odds_status = f"✅ Odds API: {len(odds_lines)} game(s)" if odds_lines else "⚠
 tab1, tab2 = st.tabs(["Today's Games", "Settlement Tracker"])
 
 with tab1:
+    if _settlement_msg:
+        st.success(_settlement_msg)
     try:
         today = datetime.today().strftime('%Y-%m-%d')
         schedule = statsapi.schedule(date=today)
