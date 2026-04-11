@@ -979,24 +979,56 @@ with tab1:
                         _fg_signal = "👍 LEAN"
                     _fg_dir = "🟢 OVER" if _fg_lean == "OVER" else "🔴 UNDER" if _fg_lean == "UNDER" else "⚪"
 
+                    # Abbreviate team names (last word) and pitchers (First initial. Last)
+                    def abbrev_team(name):
+                        parts = name.split()
+                        return parts[-1] if parts else name
+
+                    def abbrev_pitcher(name):
+                        if not name or name == "TBD":
+                            return "TBD"
+                        parts = name.split()
+                        if len(parts) >= 2:
+                            return f"{parts[0][0]}. {parts[-1]}"
+                        return name
+
+                    _away_abbr = abbrev_team(_away)
+                    _home_abbr = abbrev_team(_home)
+                    _ap_abbr = abbrev_pitcher(_ap)
+                    _hp_abbr = abbrev_pitcher(_hp)
+
+                    # Two stacked rows per game for mobile
+                    # Row 1: F5 with team/pitcher info
                     rows.append({
                         "Time": _et,
-                        "Matchup": f"{_away} @ {_home}",
-                        "Away SP": _ap if _ap != 'TBD' else '❓',
-                        "Home SP": _hp if _hp != 'TBD' else '❓',
+                        "Matchup": f"{_away_abbr}@{_home_abbr}",
+                        "SPs": f"{_ap_abbr}/{_hp_abbr}",
+                        "Mkt": "F5",
+                        "Model": _f5["total"],
+                        "Line": f"{_f5_line}{'✅' if _k5 else '~'}",
+                        "Signal": f"{_f5_dir} {_f5_signal}",
+                        # Desktop extras
+                        "Away SP": _ap if _ap != "TBD" else "❓",
+                        "Home SP": _hp if _hp != "TBD" else "❓",
                         "Park": _pf_str,
-                        "F5 Model": _f5["total"],
-                        "F5 Line": f"{_f5_line}{'✅' if _k5 else '~'}",
-                        "F5 Signal": f"{_f5_dir} {_f5_signal}",
-                        "FG Model": _fg["total"],
-                        "FG Line": f"{_fg_line}{'✅' if _kf else '~'}",
                         "Vegas": f"{_odds['total']}" if _odds else "—",
-                        "FG Signal": f"{_fg_dir} {_fg_signal}",
-                        # Mobile-only compact fields
-                        "🕐": _et,
-                        "Game": f"{_away.split()[-1]} @ {_home.split()[-1]}",
-                        "F5": f"{_f5_dir} {_f5_signal}",
-                        "FG": f"{_fg_dir} {_fg_signal}",
+                        "_sort": _et + "_1",
+                    })
+                    # Row 2: FG — no team/pitcher repeated
+                    rows.append({
+                        "Time": "",
+                        "Matchup": "",
+                        "SPs": "",
+                        "Mkt": "FG",
+                        "Model": _fg["total"],
+                        "Line": f"{_fg_line}{'✅' if _kf else '~'}",
+                        "Signal": f"{_fg_dir} {_fg_signal}",
+                        # Desktop extras
+                        "Away SP": "",
+                        "Home SP": "",
+                        "Park": "",
+                        "Vegas": f"{_odds['total']}" if _odds else "—",
+                        "_sort": _et + "_2",
                     })
                 except Exception:
                     continue
@@ -1021,12 +1053,11 @@ with tab1:
 
                 df_all = pd.DataFrame(rows)
                 if view_type == "📱 Mobile":
-                    mobile_cols = ["🕐", "Game", "F5", "FG"]
+                    mobile_cols = ["Time", "Matchup", "SPs", "Mkt", "Model", "Line", "Signal"]
                     st.dataframe(df_all[mobile_cols], use_container_width=True, hide_index=True)
                 else:
                     desktop_cols = ["Time", "Matchup", "Away SP", "Home SP", "Park",
-                                    "F5 Model", "F5 Line", "F5 Signal",
-                                    "FG Model", "FG Line", "Vegas", "FG Signal"]
+                                    "Mkt", "Model", "Line", "Vegas", "Signal"]
                     st.dataframe(df_all[desktop_cols], use_container_width=True, hide_index=True)
                 st.markdown("---")
 
