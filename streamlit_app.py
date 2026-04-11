@@ -7,8 +7,50 @@ from datetime import datetime, timedelta
 from supabase import create_client
 
 st.set_page_config(page_title="Kalshi MLB Model", layout="wide")
-st.title("Kalshi MLB Run Total Model")
-st.caption("Version 4.18 - " + datetime.today().strftime('%B %d, %Y'))
+
+st.markdown("""
+<style>
+/* ── Global ── */
+body, .stApp { background-color: #0e1117; }
+h1 { font-size: 2rem !important; font-weight: 800 !important; 
+     background: linear-gradient(90deg, #00d4ff, #00ff88);
+     -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+/* ── Signal badges ── */
+.badge-high   { background:#ff4b4b; color:white; padding:3px 10px; border-radius:12px; font-weight:700; font-size:0.8rem; }
+.badge-strong { background:#ff9900; color:white; padding:3px 10px; border-radius:12px; font-weight:700; font-size:0.8rem; }
+.badge-lean   { background:#00cc88; color:white; padding:3px 10px; border-radius:12px; font-weight:700; font-size:0.8rem; }
+.badge-none   { background:#333; color:#888; padding:3px 10px; border-radius:12px; font-size:0.8rem; }
+
+/* ── Table styling ── */
+.stDataFrame { border-radius: 10px; overflow: hidden; }
+
+/* ── Metric cards ── */
+div[data-testid="metric-container"] {
+    background: #1a1d27; border-radius: 10px; padding: 12px;
+    border: 1px solid #2a2d3a;
+}
+
+/* ── Expander styling ── */
+details { border: 1px solid #2a2d3a !important; border-radius: 10px !important; 
+          background: #1a1d27 !important; margin-bottom: 6px !important; }
+
+/* ── Button styling ── */
+.stButton > button {
+    border-radius: 8px !important; font-weight: 600 !important;
+    border: 1px solid #00d4ff !important; color: #00d4ff !important;
+    background: transparent !important;
+}
+.stButton > button:hover { background: #00d4ff22 !important; }
+
+/* ── Success/info boxes ── */
+.stSuccess { border-radius: 8px !important; }
+.stInfo    { border-radius: 8px !important; }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("# ⚾ Kalshi MLB Model")
+st.caption("Version 4.19 - " + datetime.today().strftime('%B %d, %Y'))
 
 BANKROLL = 500
 EDGE_THRESHOLD = 0.05
@@ -509,35 +551,48 @@ def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
         e = round(over_edge * 100, 1)
         if over_edge >= EDGE_THRESHOLD:
             _, bet_amt = calc_kelly(over_edge)
-            st.success(f"🟢 **OVER**\nEdge: +{e}% | Kelly: ${bet_amt}")
+            st.success(f"🟢 **OVER** | Edge: +{e}% | Kelly: ${bet_amt}")
             if supabase_connected:
+                placed = st.checkbox("📍 Placed on Kalshi", key=f"placed_{prefix}_over_{game_id}")
+                real_amt = None
+                if placed:
+                    real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
+                        value=float(bet_amt), step=1.0, key=f"real_{prefix}_over_{game_id}")
                 if st.button(f"📝 Log {prefix} OVER", key=f"log_{prefix}_over_{game_id}"):
                     if save_bet(today, away, home, away_pitcher, home_pitcher,
                                 model_total, line, price_cents, auto_prob, auto_prob,
-                                over_edge, "OVER", bet_amt, market_type, game_id):
+                                over_edge, "OVER", bet_amt, market_type, game_id,
+                                placed_on_kalshi=placed, real_amount=real_amt):
                         st.success("Logged!")
         else:
-            st.info(f"⚪ **OVER**\nEdge: {e}%")
+            st.info(f"⚪ **OVER** | Edge: {e}%")
     with col_u:
         e = round(under_edge * 100, 1)
         if under_edge >= EDGE_THRESHOLD:
             _, bet_amt = calc_kelly(under_edge)
-            st.success(f"🔴 **UNDER**\nEdge: +{e}% | Kelly: ${bet_amt}")
+            st.success(f"🔴 **UNDER** | Edge: +{e}% | Kelly: ${bet_amt}")
             if supabase_connected:
+                placed = st.checkbox("📍 Placed on Kalshi", key=f"placed_{prefix}_under_{game_id}")
+                real_amt = None
+                if placed:
+                    real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
+                        value=float(bet_amt), step=1.0, key=f"real_{prefix}_under_{game_id}")
                 if st.button(f"📝 Log {prefix} UNDER", key=f"log_{prefix}_under_{game_id}"):
                     if save_bet(today, away, home, away_pitcher, home_pitcher,
                                 model_total, line, price_cents, auto_prob, auto_prob,
-                                under_edge, "UNDER", bet_amt, market_type, game_id):
+                                under_edge, "UNDER", bet_amt, market_type, game_id,
+                                placed_on_kalshi=placed, real_amount=real_amt):
                         st.success("Logged!")
         else:
-            st.info(f"⚪ **UNDER**\nEdge: {e}%")
+            st.info(f"⚪ **UNDER** | Edge: {e}%")
     return over_edge, under_edge
 
 def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
              kalshi_line, kalshi_over_price, model_prob, your_prob, edge,
-             direction, bet_amt, market_type="full", game_id=None):
+             direction, bet_amt, market_type="full", game_id=None,
+             placed_on_kalshi=False, real_amount=None):
     try:
-        supabase.table("mlb_settlements").insert({
+        row = {
             "game_date": game_date, "away_team": away, "home_team": home,
             "away_pitcher": away_pitcher, "home_pitcher": home_pitcher,
             "model_total": model_total, "kalshi_line": kalshi_line,
@@ -545,7 +600,10 @@ def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
             "your_prob": your_prob, "edge": round(edge, 4),
             "bet_direction": direction, "bet_amount": bet_amt,
             "market_type": market_type, "game_id": game_id,
-        }).execute()
+            "placed_on_kalshi": placed_on_kalshi,
+            "real_amount": real_amount if placed_on_kalshi else None,
+        }
+        supabase.table("mlb_settlements").insert(row).execute()
         return True
     except Exception as e:
         st.error(f"Save error: {e}")
@@ -924,32 +982,69 @@ with tab1:
         st.error(f"Error: {e}")
 
 with tab2:
-    st.subheader("Settlement Tracker")
+    st.subheader("📊 Settlement Tracker")
     if supabase_connected:
         try:
             data = supabase.table("mlb_settlements").select("*").order("game_date", desc=True).execute()
             if data.data:
                 df = pd.DataFrame(data.data)
-                settled = df[df["result"].notna()]
-                if not settled.empty:
-                    wins = (settled["result"] == "WIN").sum()
-                    losses = (settled["result"] == "LOSS").sum()
-                    pushes = (settled["result"] == "PUSH").sum()
-                    pnl = settled["profit_loss"].sum()
-                    wp = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0
-                    m1, m2, m3, m4, m5 = st.columns(5)
-                    m1.metric("Total Bets", len(settled))
-                    m2.metric("Record", f"{wins}W-{losses}L-{pushes}P")
-                    m3.metric("Win %", f"{wp}%")
-                    m4.metric("Total P&L", f"${pnl:+.2f}")
-                    m5.metric("Unsettled", len(df[df["result"].isna()]))
-                    st.markdown("---")
-                display_cols = [c for c in [
-                    "game_date", "away_team", "home_team", "market_type",
-                    "model_total", "kalshi_line", "bet_direction", "bet_amount",
-                    "actual_total", "result", "profit_loss", "settled_at"
-                ] if c in df.columns]
-                st.dataframe(df[display_cols], use_container_width=True)
+
+                # ── Filter toggle ─────────────────────────────────────────────
+                view_mode = st.radio(
+                    "View",
+                    ["All Model Bets", "Real Kalshi Bets Only"],
+                    horizontal=True
+                )
+                if view_mode == "Real Kalshi Bets Only":
+                    if "placed_on_kalshi" in df.columns:
+                        df = df[df["placed_on_kalshi"] == True]
+                    else:
+                        st.info("No real Kalshi bets logged yet — use the '📍 Placed on Kalshi' checkbox when logging.")
+
+                if df.empty:
+                    st.info("No bets in this view yet.")
+                else:
+                    settled = df[df["result"].notna()]
+                    if not settled.empty:
+                        wins = (settled["result"] == "WIN").sum()
+                        losses = (settled["result"] == "LOSS").sum()
+                        pushes = (settled["result"] == "PUSH").sum()
+                        wp = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0
+
+                        # P&L — use real_amount for Kalshi view, bet_amount for model view
+                        if view_mode == "Real Kalshi Bets Only" and "real_amount" in settled.columns:
+                            pnl = settled["profit_loss"].sum()
+                        else:
+                            pnl = settled["profit_loss"].sum()
+
+                        m1, m2, m3, m4, m5 = st.columns(5)
+                        m1.metric("Total Bets", len(settled))
+                        m2.metric("Record", f"{wins}W-{losses}L-{pushes}P")
+                        m3.metric("Win %", f"{wp}%")
+                        m4.metric("Total P&L", f"${pnl:+.2f}")
+                        m5.metric("Unsettled", len(df[df["result"].isna()]))
+                        st.markdown("---")
+
+                    # ── Display columns ───────────────────────────────────────
+                    base_cols = ["game_date", "away_team", "home_team", "market_type",
+                                 "model_total", "kalshi_line", "bet_direction", "bet_amount"]
+                    if view_mode == "Real Kalshi Bets Only":
+                        base_cols.append("real_amount")
+                    base_cols += ["actual_total", "result", "profit_loss", "settled_at"]
+                    display_cols = [c for c in base_cols if c in df.columns]
+
+                    # Color code results
+                    def highlight_result(row):
+                        if row.get("result") == "WIN":
+                            return ["background-color: #1a3a2a"] * len(row)
+                        elif row.get("result") == "LOSS":
+                            return ["background-color: #3a1a1a"] * len(row)
+                        return [""] * len(row)
+
+                    st.dataframe(
+                        df[display_cols].style.apply(highlight_result, axis=1),
+                        use_container_width=True
+                    )
             else:
                 st.info("No bets logged yet.")
         except Exception as e:
