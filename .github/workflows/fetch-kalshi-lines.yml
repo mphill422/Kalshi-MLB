@@ -2,17 +2,20 @@ name: Fetch Kalshi MLB Lines
 
 on:
   schedule:
-    - cron: '0 14 * * *'  # 10am ET (14:00 UTC) every day
-  workflow_dispatch:  # allows manual trigger too
+    - cron: '0 14 * * *'   # 10:00 AM ET (14:00 UTC)
+    - cron: '0 17 * * *'   # 1:00 PM ET (17:00 UTC)
+  workflow_dispatch:        # Manual trigger
 
 jobs:
   fetch-lines:
     runs-on: ubuntu-latest
     steps:
-      - name: Call Supabase Edge Function
+      - name: Trigger Supabase Edge Function
         run: |
           curl -X POST \
-            'https://oirnfhhuyjuotkrlymxd.supabase.co/functions/v1/fetch-kalshi-lines' \
-            -H 'Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}' \
-            -H 'Content-Type: application/json' \
-            -d '{}'
+            "${{ secrets.SUPABASE_FUNCTION_URL }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            --fail \
+            --silent \
+            --show-error
