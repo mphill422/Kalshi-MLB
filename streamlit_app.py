@@ -907,9 +907,73 @@ def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather):
         "wind_adj": w_adj, "temp_adj": t_adj, "wind_label": w_label,
     }
 
+@st.cache_data(ttl=3600)
+def poisson_over_prob(lam, line):
+    """
+    P(total > line) using Poisson distribution.
+    lam = expected total runs (lambda parameter)
+    line = the over/under line (e.g. 8.5)
+    Poisson is the correct model for discrete run scoring in baseball.
+    """
+    import math
+    # P(X > line) = 1 - P(X <= floor(line))
+    k_max = int(line)  # floor of line
+    cdf = 0.0
+    for k in range(0, k_max + 1):
+        cdf += (math.exp(-lam) * (lam ** k)) / math.factorial(k)
+    return max(0.10, min(0.90, 1.0 - cdf))
+
+@st.cache_data(ttl=300)
+def monte_carlo_prob(model_total, line, era_uncertainty=0.40, rpg_uncertainty=0.25,
+                     n_sims=5000):
+    """
+    Monte Carlo simulation around Poisson model.
+    Samples ERA and RPG uncertainty to get a distribution of expected totals,
+    then computes P(over) averaging across all simulations.
+    era_uncertainty: std dev of ERA error (0.40 = ±0.40 ERA typical forecast error)
+    rpg_uncertainty: std dev of RPG error (0.25 = ±0.25 RPG typical team variance)
+    """
+    import random
+    import math
+    over_count = 0
+    for _ in range(n_sims):
+        # Sample uncertainty around model total
+        # ERA uncertainty contributes ~0.3 runs per game per pitcher
+        # RPG uncertainty contributes ~0.25 runs per team
+        era_noise = random.gauss(0, era_uncertainty * 0.3)
+        rpg_noise = random.gauss(0, rpg_uncertainty)
+        sim_total = max(2.0, model_total + era_noise + rpg_noise)
+        # Use Poisson for this simulated total
+        p_over = poisson_over_prob(sim_total, line)
+        # Sample one game outcome from this probability
+        if random.random() < p_over:
+            over_count += 1
+    return over_count / n_sims
+
 def model_to_prob(model_total, line):
-    prob = 50 + ((model_total - line) * 8)
-    return int(round(max(20, min(80, prob))))
+    """
+    Main probability function — Poisson + Monte Carlo.
+    Returns probability (0-100 integer) that total goes OVER the line.
+    """
+    # Base probability from Poisson distribution
+    p_poisson = poisson_over_prob(model_total, line)
+    # Refine with Monte Carlo to account for input uncertainty
+    p_mc = monte_carlo_prob(model_total, line)
+    # Blend: 60% Monte Carlo, 40% pure Poisson
+    p_final = 0.60 * p_mc + 0.40 * p_poisson
+    return int(round(max(15, min(85, p_final * 100))))
+
+def model_to_prob_detail(model_total, line):
+    """Returns detailed probability breakdown for display."""
+    p_poisson = poisson_over_prob(model_total, line)
+    p_mc = monte_carlo_prob(model_total, line)
+    p_final = 0.60 * p_mc + 0.40 * p_poisson
+    p_final = max(0.15, min(0.85, p_final))
+    return {
+        "poisson": round(p_poisson * 100, 1),
+        "monte_carlo": round(p_mc * 100, 1),
+        "final": round(p_final * 100, 1),
+    }
 
 def calc_kelly(edge):
     bet_pct = min((edge / 1.0) * KELLY_FRACTION, MAX_BET_PCT)
@@ -917,10 +981,20 @@ def calc_kelly(edge):
 
 def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
                  away_pitcher, home_pitcher, market_type, today):
-    auto_prob = model_to_prob(model_total, line)
+    # Poisson + Monte Carlo probability
+    prob_detail = model_to_prob_detail(model_total, line)
+    auto_prob = int(prob_detail["final"])
     implied = price_cents / 100
     over_edge = (auto_prob / 100) - implied
     under_edge = (1 - auto_prob / 100) - (1 - implied)
+
+    # Show model probability breakdown
+    st.caption(
+        f"🎲 Model: {prob_detail['final']}% OVER | "
+        f"Poisson: {prob_detail['poisson']}% | "
+        f"MC: {prob_detail['monte_carlo']}% | "
+        f"Implied: {round(implied * 100, 1)}%"
+    )
 
     col_o, col_u = st.columns(2)
     with col_o:
