@@ -314,32 +314,132 @@ STADIUM_COORDS = {
     "Washington Nationals":  (38.8730, -77.0074),     # Nationals Park
 }
 
+# ── Pitcher ERA fallback — updated with 2026 early season data ───────────────
+# Sources: MLB.com, FanGraphs, DraftKings Network, Fox Sports (Apr 13 2026)
+# 🟢 = confirmed 2026 ERA | 🟡 = 2025 baseline projection
 PITCHER_ERA_FALLBACK = {
-    "Paul Skenes": 1.96, "Tarik Skubal": 2.94, "Yoshinobu Yamamoto": 2.49,
-    "Chris Sale": 3.10, "Max Fried": 3.25, "Zack Wheeler": 3.18,
-    "Cristopher Sanchez": 2.95, "Logan Webb": 3.12, "Corbin Burnes": 3.22,
-    "Spencer Strider": 3.20, "Freddy Peralta": 3.40, "Gerrit Cole": 3.40,
-    "Dylan Cease": 3.38, "Luis Castillo": 3.50, "Sandy Alcantara": 3.50,
-    "Framber Valdez": 3.45, "Kevin Gausman": 3.45, "Hunter Brown": 3.18,
-    "Nick Pivetta": 2.87, "Drew Rasmussen": 2.76, "Sonny Gray": 3.80,
-    "Yu Darvish": 3.80, "Mitch Keller": 3.91, "Jameson Taillon": 3.68,
-    "Shane McClanahan": 3.86, "Roki Sasaki": 3.70, "Tanner Bibee": 4.24,
-    "Zac Gallen": 3.85, "Gavin Williams": 3.92, "Shane Bieber": 3.60,
-    "Luis Severino": 4.10, "Andrew Abbott": 4.05, "Reese Olson": 4.15,
-    "Jared Jones": 4.20, "Nestor Cortes": 4.20, "Edward Cabrera": 4.20,
-    "Chase Burns": 4.10, "Parker Messick": 4.20, "Emerson Hancock": 4.50,
-    "Kyle Harrison": 4.30, "Nick Martinez": 4.40, "Eric Lauer": 4.35,
-    "Chris Paddack": 4.55, "Walker Buehler": 4.80, "Braxton Garrett": 4.30,
-    "Michael Soroka": 4.30, "Matthew Liberatore": 4.40, "Trevor Rogers": 4.35,
-    "Robbie Ray": 4.80, "Jake Irvin": 4.60, "Carlos Rodon": 4.50,
-    "Kyle Freeland": 4.65, "Cade Cavalli": 4.55, "Patrick Corbin": 5.20,
-    "Konnor Griffin": 3.90, "Simeon Woods Richardson": 4.40, "Jared Bubic": 4.50,
-    "Frankie Montas": 4.60, "Jesus Luzardo": 4.10, "Jose Suarez": 4.70,
-    "Bailey Ober": 3.90, "Joe Ryan": 3.85, "Aaron Civale": 4.50,
-    "Bryce Miller": 4.20, "George Kirby": 3.60, "Bryan Woo": 3.80,
-    "Michael King": 3.75, "MacKenzie Gore": 3.90, "Ranger Suarez": 3.80,
-    "Tylor Megill": 4.30, "Jose Quintana": 4.50, "Charlie Morton": 4.40,
-    "Dane Dunning": 4.60, "Graham Ashcraft": 4.55, "Hayden Wesneski": 4.40,
+    # ── Elite tier — 2026 confirmed ──────────────────────────────────────────
+    "Paul Skenes": 4.50,          # 🟢 9.53 opening day, rebounded — using mid estimate
+    "Tarik Skubal": 2.50,         # 🟢 elite through early starts
+    "Yoshinobu Yamamoto": 2.49,   # 🟡 2025 baseline, expected similar
+    "Cristopher Sanchez": 1.65,   # 🟢 fantastic 3 starts, 1.65 ERA
+    "Chase Burns": 0.82,          # 🟢 elite — 0.82 ERA, 44% whiff rate
+    "Garrett Crochet": 2.59,      # 🟡 2025 career best, expected similar
+    "Cam Schlittler": 1.62,       # 🟢 Yankees breakout, 1.62 ERA
+    "Rhett Lowder": 1.64,         # 🟢 Reds, 1.64 ERA early
+    "Bryce Elder": 0.00,          # 🟢 2 starts, 0 ER — regress to 2.50
+    "Will Warren": 3.07,          # 🟢 Yankees, 3.07 ERA confirmed
+    "Cade Cavalli": 2.51,         # 🟢 2.51 ERA (xERA 4.22 — regression coming)
+    "Logan Webb": 3.12,           # 🟡 workhorse, consistent
+    "Corbin Burnes": 3.22,        # 🟡 Giants ace
+    "Max Fried": 3.25,            # 🟡 Yankees
+    "Zack Wheeler": 3.18,         # 🟡 returning from injury
+    "Framber Valdez": 3.00,       # 🟡 Tigers workhorse
+    "Freddy Peralta": 3.40,       # 🟡 Mets
+    "Dylan Cease": 3.38,          # 🟡 Padres
+    "Luis Castillo": 3.50,        # 🟡 Mariners
+    "Kevin Gausman": 3.45,        # 🟡 Blue Jays
+    "Hunter Brown": 3.18,         # 🟡 Astros
+    "George Kirby": 3.60,         # 🟡 Mariners
+    "Bryan Woo": 3.80,            # 🟡 Mariners
+    "Michael King": 3.75,         # 🟡 Padres
+    "MacKenzie Gore": 3.90,       # 🟡 Nationals
+    "Ranger Suarez": 3.80,        # 🟡 Phillies
+    "Sandy Alcantara": 3.50,      # 🟡 Marlins
+    "Roki Sasaki": 3.70,          # 🟡 Dodgers
+    "Joe Ryan": 3.85,             # 🟡 Twins
+    "Bailey Ober": 3.90,          # 🟡 Twins
+    # ── Mid tier ─────────────────────────────────────────────────────────────
+    "Tanner Bibee": 4.24,         # 🟡 Guardians
+    "Zac Gallen": 3.85,           # 🟡 Diamondbacks
+    "Gavin Williams": 3.92,       # 🟡 Guardians
+    "Shane Bieber": 3.60,         # 🟡 Red Sox
+    "Luis Severino": 4.88,        # 🟢 11 walks in 13.1 IP, struggling
+    "Andrew Abbott": 4.05,        # 🟡 Reds
+    "Reese Olson": 4.15,          # 🟡 Tigers
+    "Jared Jones": 4.20,          # 🟡 Pirates
+    "Nestor Cortes": 4.20,        # 🟡 Brewers
+    "Edward Cabrera": 4.20,       # 🟡 Marlins
+    "Parker Messick": 4.20,       # 🟡
+    "Emerson Hancock": 4.50,      # 🟡
+    "Kyle Harrison": 4.30,        # 🟡 Giants
+    "Nick Martinez": 4.40,        # 🟡
+    "Eric Lauer": 4.35,           # 🟡
+    "Chris Paddack": 4.55,        # 🟡
+    "Walker Buehler": 4.80,       # 🟡 Dodgers
+    "Braxton Garrett": 4.30,      # 🟡
+    "Matthew Liberatore": 4.40,   # 🟡 Cardinals
+    "Trevor Rogers": 4.35,        # 🟡
+    "Robbie Ray": 4.80,           # 🟡
+    "Jake Irvin": 4.60,           # 🟡 Nationals
+    "Carlos Rodon": 4.50,         # 🟡 Giants
+    "Kyle Freeland": 4.65,        # 🟡 Rockies
+    "Patrick Corbin": 5.20,       # 🟡 struggling
+    "Konnor Griffin": 3.90,       # 🟡 Pirates top prospect
+    "Simeon Woods Richardson": 4.40,
+    "Jared Bubic": 4.50,
+    "Jesus Luzardo": 4.10,
+    "Jose Suarez": 4.70,
+    "Aaron Civale": 4.50,
+    "Bryce Miller": 4.20,
+    "Tylor Megill": 4.30,
+    "Jose Quintana": 4.50,
+    "Charlie Morton": 4.40,
+    "Dane Dunning": 4.60,
+    "Graham Ashcraft": 4.55,
+    "Hayden Wesneski": 4.40,
+    "Yu Darvish": 3.80,
+    "Mitch Keller": 3.91,
+    "Jameson Taillon": 3.68,
+    "Shane McClanahan": 3.86,
+    "Sonny Gray": 3.80,
+    # ── New 2026 pitchers seen on slate ──────────────────────────────────────
+    "Yusei Kikuchi": 6.76,        # 🟢 11 runs in 14.2 IP, struggling
+    "Ryne Nelson": 4.20,          # 🟢 4.20 ERA, xERA 5.61 — regression risk
+    "Javier Assad": 3.20,         # 🟢 great first start 2026
+    "Mike Burrows": 4.20,         # 🟡 Pirates prospect
+    "Janson Junk": 4.80,          # 🟡 Marlins
+    "Casey Mize": 4.30,           # 🟡 Tigers
+    "Keider Montero": 4.50,       # 🟡 Tigers
+    "Jack Kochanowicz": 4.40,     # 🟡 Angels
+    "Brandon Williamson": 4.20,   # 🟡 Reds
+    "Jacob Lopez": 4.60,          # 🟡
+    "Erick Fedde": 4.40,          # 🟡 White Sox
+    "Michael Wacha": 4.10,        # 🟡 Royals
+    "Nick Martinez": 4.40,        # 🟡
+    "Foster Griffin": 4.70,       # 🟡
+    "Kyle Leahy": 4.50,           # 🟡
+    "Logan Webb": 3.12,           # 🟡
+    "Chris Bassitt": 4.00,        # 🟡 Orioles
+    "Shane Baz": 4.20,            # 🟡 Rays
+    "Slade Cecconi": 4.40,        # 🟡 Braves
+    "Davis Martin": 4.60,         # 🟡 White Sox
+    "Kris Bubic": 4.20,           # 🟡 Royals
+    "Chad Patrick": 4.50,         # 🟡 Brewers
+    "Connelly Early": 4.80,       # 🟡 Red Sox
+    "Dustin May": 4.30,           # 🟡 Cardinals
+    "Ryan Feltner": 4.70,         # 🟡 Rockies
+    "German Marquez": 5.00,       # 🟡 Rockies
+    "Jack Leiter": 3.80,          # 🟡 Rangers top prospect
+    "Emmet Sheehan": 4.20,        # 🟡 Dodgers
+    "Lance McCullers Jr.": 3.90,  # 🟡 Astros
+    "Luis Castillo": 3.50,        # 🟡 Mariners
+    "George Kirby": 3.60,         # 🟡 Mariners
+    "Brandon Pfaadt": 4.20,       # 🟡 Diamondbacks
+    "Taijuan Walker": 4.50,       # 🟡 Phillies
+    "Martin Perez": 4.40,         # 🟡 Braves
+    "Joe Ryan": 3.85,             # 🟡 Twins
+    "Paul Blackburn": 4.30,       # 🟡
+    "Landen Roupp": 3.80,         # 🟡 Giants
+    "Cam Schlittler": 1.62,       # 🟢 Yankees
+    "Will Warren": 3.07,          # 🟢 Yankees
+    "Steven Matz": 4.50,          # 🟡 Rays
+    "J.T. Ginn": 4.20,            # 🟡 Mets
+    "Clay Holmes": 3.80,          # 🟡 Mets (converted SP)
+    "Kodai Senga": 3.50,          # 🟡 Mets — returning from injury
+    "Logan Webb": 3.12,           # 🟡 Giants
+    "Braxton Ashcraft": 4.30,     # 🟡 Pirates
+    "Edward Cabrera": 4.20,       # 🟡 Marlins
 }
 
 TEAM_RUNS_FALLBACK = {
