@@ -442,6 +442,93 @@ PITCHER_ERA_FALLBACK = {
     "Edward Cabrera": 4.20,       # 🟡 Marlins
 }
 
+# ── Pitcher handedness ───────────────────────────────────────────────────────
+# R = Right, L = Left
+PITCHER_HAND = {
+    # Elite
+    "Paul Skenes": "R", "Tarik Skubal": "L", "Yoshinobu Yamamoto": "R",
+    "Cristopher Sanchez": "L", "Chase Burns": "R", "Garrett Crochet": "L",
+    "Cam Schlittler": "R", "Rhett Lowder": "L", "Logan Webb": "R",
+    "Corbin Burnes": "R", "Max Fried": "L", "Zack Wheeler": "R",
+    "Framber Valdez": "L", "Freddy Peralta": "R", "Dylan Cease": "R",
+    "Luis Castillo": "R", "Kevin Gausman": "R", "Hunter Brown": "R",
+    "George Kirby": "R", "Bryan Woo": "R", "Michael King": "R",
+    "MacKenzie Gore": "L", "Ranger Suarez": "L", "Sandy Alcantara": "R",
+    "Roki Sasaki": "R", "Joe Ryan": "R", "Bailey Ober": "R",
+    # Mid tier
+    "Tanner Bibee": "R", "Zac Gallen": "R", "Gavin Williams": "R",
+    "Shane Bieber": "R", "Luis Severino": "R", "Andrew Abbott": "L",
+    "Reese Olson": "R", "Jared Jones": "R", "Nestor Cortes": "L",
+    "Edward Cabrera": "R", "Emerson Hancock": "R", "Kyle Harrison": "L",
+    "Nick Martinez": "R", "Eric Lauer": "L", "Chris Paddack": "R",
+    "Walker Buehler": "R", "Braxton Garrett": "L", "Matthew Liberatore": "L",
+    "Trevor Rogers": "L", "Robbie Ray": "L", "Jake Irvin": "R",
+    "Carlos Rodon": "L", "Kyle Freeland": "L", "Cade Cavalli": "R",
+    "Konnor Griffin": "R", "Jesus Luzardo": "L", "Jose Suarez": "L",
+    "Aaron Civale": "R", "Bryce Miller": "R", "Tylor Megill": "R",
+    "Jose Quintana": "L", "Charlie Morton": "R", "Dane Dunning": "R",
+    "Graham Ashcraft": "R", "Hayden Wesneski": "R", "Yu Darvish": "R",
+    "Mitch Keller": "R", "Jameson Taillon": "R", "Shane McClanahan": "L",
+    "Sonny Gray": "R", "Will Warren": "R", "Yusei Kikuchi": "L",
+    "Ryne Nelson": "R", "Javier Assad": "R", "Mike Burrows": "R",
+    "Janson Junk": "R", "Casey Mize": "R", "Brandon Williamson": "L",
+    "Erick Fedde": "R", "Michael Wacha": "R", "Foster Griffin": "L",
+    "Chris Bassitt": "R", "Brandon Pfaadt": "R", "Taijuan Walker": "R",
+    "Joe Ryan": "R", "Landen Roupp": "R", "Bryce Elder": "R",
+    "Jack Leiter": "R", "Lance McCullers Jr.": "R", "George Kirby": "R",
+    "Kodai Senga": "R", "Clay Holmes": "R", "Logan Webb": "R",
+    "Braxton Ashcraft": "R", "Jacob Lopez": "R", "Martin Perez": "L",
+    "Paul Blackburn": "R", "Steven Matz": "L", "Simeon Woods Richardson": "R",
+    "Jared Bubic": "L", "Frankie Montas": "R", "Parker Messick": "L",
+}
+
+# ── Team lineup L/R split (% of PAs from LHH) — 2025 baseline ────────────────
+# Higher = more left-handed lineup (favorable for RHP)
+# Source: Baseball Reference 2025 platoon splits
+LINEUP_LHH_PCT = {
+    "New York Yankees": 0.52, "Boston Red Sox": 0.48, "Toronto Blue Jays": 0.44,
+    "Baltimore Orioles": 0.42, "Tampa Bay Rays": 0.45, "Cleveland Guardians": 0.43,
+    "Minnesota Twins": 0.46, "Detroit Tigers": 0.41, "Kansas City Royals": 0.44,
+    "Chicago White Sox": 0.40, "Houston Astros": 0.47, "Seattle Mariners": 0.43,
+    "Texas Rangers": 0.45, "Los Angeles Angels": 0.42, "Oakland Athletics": 0.41,
+    "Athletics": 0.41, "New York Mets": 0.46, "Philadelphia Phillies": 0.48,
+    "Atlanta Braves": 0.44, "Washington Nationals": 0.43, "Miami Marlins": 0.42,
+    "Chicago Cubs": 0.47, "Milwaukee Brewers": 0.45, "St. Louis Cardinals": 0.44,
+    "Pittsburgh Pirates": 0.43, "Cincinnati Reds": 0.44, "Los Angeles Dodgers": 0.50,
+    "San Diego Padres": 0.46, "Arizona Diamondbacks": 0.45, "San Francisco Giants": 0.47,
+    "Colorado Rockies": 0.43,
+}
+
+def get_lineup_lhh_pct(team_name):
+    for key in LINEUP_LHH_PCT:
+        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
+            return LINEUP_LHH_PCT[key]
+    return 0.44  # league average
+
+def platoon_adj(pitcher_name, opposing_team):
+    """
+    Returns ERA adjustment based on pitcher hand vs opposing lineup.
+    RHP vs heavy LHH lineup = slight advantage (reduce ERA)
+    LHP vs heavy RHH lineup = slight disadvantage (increase ERA)
+    Scale: max ±0.40 ERA adjustment
+    """
+    hand = PITCHER_HAND.get(pitcher_name)
+    if not hand:
+        return 0.0
+    lhh_pct = get_lineup_lhh_pct(opposing_team)
+    rhh_pct = 1.0 - lhh_pct
+    # Neutral is 0.44 LHH / 0.56 RHH (league avg)
+    NEUTRAL_LHH = 0.44
+    if hand == "R":
+        # RHP benefits from more LHH (opposite hand)
+        deviation = lhh_pct - NEUTRAL_LHH
+        adj = deviation * 2.0  # scale to ~±0.20 ERA
+    else:  # LHP
+        # LHP benefits from more RHH (opposite hand)
+        deviation = rhh_pct - (1 - NEUTRAL_LHH)
+        adj = deviation * 2.0
+    return round(-adj, 2)  # negative = lower ERA (pitcher advantage)
+
 TEAM_RUNS_FALLBACK = {
     "New York Yankees": 4.7, "Boston Red Sox": 4.7, "Toronto Blue Jays": 4.8,
     "Baltimore Orioles": 4.5, "Tampa Bay Rays": 4.1, "Cleveland Guardians": 4.3,
@@ -770,8 +857,13 @@ def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather):
     base = round(away_rpg + home_rpg, 2)
     away_era, away_recent, away_src = blend_era(away_pitcher)
     home_era, home_recent, home_src = blend_era(home_pitcher)
-    away_sp_adj = round(((away_era - LEAGUE_AVG_ERA) / 9) * F5_INNINGS * 0.5, 2)
-    home_sp_adj = round(((home_era - LEAGUE_AVG_ERA) / 9) * F5_INNINGS * 0.5, 2)
+    # Platoon adjustment — pitcher hand vs opposing lineup
+    away_platoon = platoon_adj(away_pitcher, home)   # away SP faces home lineup
+    home_platoon = platoon_adj(home_pitcher, away)   # home SP faces away lineup
+    away_era_adj = away_era + away_platoon
+    home_era_adj = home_era + home_platoon
+    away_sp_adj = round(((away_era_adj - LEAGUE_AVG_ERA) / 9) * F5_INNINGS * 0.5, 2)
+    home_sp_adj = round(((home_era_adj - LEAGUE_AVG_ERA) / 9) * F5_INNINGS * 0.5, 2)
     w_adj, t_adj, w_label = weather_adjs(weather, home, scale=F5_INNINGS / TOTAL_INNINGS)
     raw = base + away_sp_adj + home_sp_adj + w_adj + t_adj
     return {
@@ -779,6 +871,9 @@ def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather):
         "away_era": away_era, "away_recent": away_recent, "away_src": away_src,
         "home_era": home_era, "home_recent": home_recent, "home_src": home_src,
         "away_sp_adj": away_sp_adj, "home_sp_adj": home_sp_adj,
+        "away_platoon": away_platoon, "home_platoon": home_platoon,
+        "away_hand": PITCHER_HAND.get(away_pitcher, "?"),
+        "home_hand": PITCHER_HAND.get(home_pitcher, "?"),
         "wind_adj": w_adj, "temp_adj": t_adj, "wind_label": w_label,
     }
 
@@ -788,8 +883,13 @@ def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather):
     base = round(away_rpg + home_rpg, 1)
     away_era, away_recent, away_src = blend_era(away_pitcher)
     home_era, home_recent, home_src = blend_era(home_pitcher)
-    away_sp_adj = round(((away_era - LEAGUE_AVG_ERA) / 9) * SP_INNINGS * 0.5, 2)
-    home_sp_adj = round(((home_era - LEAGUE_AVG_ERA) / 9) * SP_INNINGS * 0.5, 2)
+    # Platoon adjustment — pitcher hand vs opposing lineup
+    away_platoon = platoon_adj(away_pitcher, home)
+    home_platoon = platoon_adj(home_pitcher, away)
+    away_era_adj = away_era + away_platoon
+    home_era_adj = home_era + home_platoon
+    away_sp_adj = round(((away_era_adj - LEAGUE_AVG_ERA) / 9) * SP_INNINGS * 0.5, 2)
+    home_sp_adj = round(((home_era_adj - LEAGUE_AVG_ERA) / 9) * SP_INNINGS * 0.5, 2)
     away_bp_era = get_bullpen_era(away)
     home_bp_era = get_bullpen_era(home)
     bp_inn = TOTAL_INNINGS - SP_INNINGS
@@ -1206,11 +1306,17 @@ with tab1:
                     fg = calc_fg(away, home, ap, hp, pf, wx)
 
                     with st.expander(f"**{away} @ {home}** — {et}"):
-                        # ── Pitchers & ERA (always single line on mobile) ──────
+                        # ── Pitchers & ERA with handedness ────────────────────
                         away_src = '🟢' if f5['away_src'] == 'live' else '🟡'
                         home_src = '🟢' if f5['home_src'] == 'live' else '🟡'
-                        away_line = f"**Away:** {away} | SP: {ap} | ERA: {f5['away_era']} {away_src}"
-                        home_line = f"**Home:** {home} | SP: {hp} | ERA: {f5['home_era']} {home_src}"
+                        away_hand = f5.get('away_hand', '?')
+                        home_hand = f5.get('home_hand', '?')
+                        away_plat = f5.get('away_platoon', 0.0)
+                        home_plat = f5.get('home_platoon', 0.0)
+                        away_plat_str = f" | Platoon: {away_plat:+.2f}" if away_plat != 0.0 else ""
+                        home_plat_str = f" | Platoon: {home_plat:+.2f}" if home_plat != 0.0 else ""
+                        away_line = f"**Away SP:** {ap} ({away_hand}HP) | ERA: {f5['away_era']} {away_src}{away_plat_str}"
+                        home_line = f"**Home SP:** {hp} ({home_hand}HP) | ERA: {f5['home_era']} {home_src}{home_plat_str}"
                         st.markdown(away_line + "  \n" + home_line)
 
                         # Park + weather — 2 cols on mobile, 3 on desktop
