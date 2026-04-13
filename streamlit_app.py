@@ -1224,9 +1224,20 @@ with tab2:
                         pushes = (settled["result"] == "PUSH").sum()
                         wp = round(wins / (wins + losses) * 100, 1) if (wins + losses) > 0 else 0
 
-                        # P&L — use real_amount for Kalshi view, bet_amount for model view
+                        # P&L — use real_amount for Kalshi view, recalculate from real cost
                         if view_mode == "Real Kalshi Bets Only" and "real_amount" in settled.columns:
-                            pnl = settled["profit_loss"].sum()
+                            # Recalculate real P&L: for wins use profit_loss ratio, for losses use real_amount
+                            real_pnl = 0.0
+                            for _, row in settled.iterrows():
+                                real_amt = row.get("real_amount") or row.get("bet_amount") or 0
+                                model_amt = row.get("bet_amount") or 25
+                                model_pnl = row.get("profit_loss") or 0
+                                if model_amt and model_amt > 0:
+                                    # Scale model P&L by real/model ratio
+                                    real_pnl += round(model_pnl * (real_amt / model_amt), 2)
+                                else:
+                                    real_pnl += model_pnl
+                            pnl = round(real_pnl, 2)
                         else:
                             pnl = settled["profit_loss"].sum()
 
@@ -1243,6 +1254,18 @@ with tab2:
                                  "model_total", "kalshi_line", "bet_direction", "bet_amount"]
                     if view_mode == "Real Kalshi Bets Only":
                         base_cols.append("real_amount")
+                        # Add real P&L column
+                        if "real_amount" in df.columns and "profit_loss" in df.columns and "bet_amount" in df.columns:
+                            df = df.copy()
+                            def calc_real_pnl(row):
+                                real = row.get("real_amount") or row.get("bet_amount") or 0
+                                model = row.get("bet_amount") or 25
+                                pnl = row.get("profit_loss") or 0
+                                if model and model > 0:
+                                    return round(pnl * (real / model), 2)
+                                return pnl
+                            df["real_P&L"] = df.apply(calc_real_pnl, axis=1)
+                            base_cols.append("real_P&L")
                     base_cols += ["actual_total", "result", "profit_loss", "settled_at"]
                     display_cols = [c for c in base_cols if c in df.columns]
 
