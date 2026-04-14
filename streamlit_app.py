@@ -6,6 +6,18 @@ import requests
 from datetime import datetime, timedelta
 from supabase import create_client
 
+# ── Always use Eastern Time for dates (MLB runs on ET) ───────────────────────
+from datetime import timezone
+ET_OFFSET = timezone(timedelta(hours=-4))  # EDT (EST is -5, EDT is -4)
+
+def today_et():
+    """Returns today's date in Eastern Time regardless of server timezone."""
+    return datetime.now(ET_OFFSET).strftime('%Y-%m-%d')
+
+def now_et():
+    """Returns current datetime in Eastern Time."""
+    return datetime.now(ET_OFFSET)
+
 st.set_page_config(page_title="MPH MLB Model", layout="wide", page_icon="⚾")
 
 st.markdown("""
@@ -190,7 +202,7 @@ st.markdown(f"""
   </div>
   <div style="text-align:right">
     <div class="mph-badge">V4.21</div>
-    <div class="mph-sub" style="margin-top:4px">{datetime.today().strftime('%b %d, %Y')}</div>
+    <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y')}</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -852,7 +864,7 @@ def fetch_recent_team_rpg(team_name, n_games=10):
             return None
 
         # Get last N games
-        today = datetime.today().strftime('%Y-%m-%d')
+        today = today_et()
         start = (datetime.today() - timedelta(days=20)).strftime('%Y-%m-%d')
         sched_resp = _req.get(
             f"https://statsapi.mlb.com/api/v1/schedule?teamId={team_id}"
@@ -1216,7 +1228,7 @@ def settle_result(actual_total, kalshi_line, bet_direction, bet_amount, kalshi_o
 def run_auto_settlement():
     if not supabase_connected:
         return None
-    today_str = datetime.today().strftime('%Y-%m-%d')
+    today_str = today_et()
     try:
         resp = supabase.table("mlb_settlements").select("*") \
             .is_("actual_total", "null").lt("game_date", today_str).execute()
@@ -1256,7 +1268,7 @@ def fetch_kalshi_lines():
     if not supabase_connected:
         return {"**error**": "Supabase not connected"}
     try:
-        today = datetime.today().strftime('%Y-%m-%d')
+        today = today_et()
         resp = supabase.table("kalshi_lines").select("*").eq("game_date", today).execute()
         rows = resp.data or []
         result = {}
@@ -1344,7 +1356,7 @@ with tab1:
     if _settlement_msg:
         st.success(_settlement_msg)
     try:
-        today = datetime.today().strftime('%Y-%m-%d')
+        today = today_et()
         schedule = statsapi.schedule(date=today)
         if not schedule:
             st.warning("No games scheduled today.")
