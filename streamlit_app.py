@@ -557,44 +557,68 @@ TEAM_BULLPEN_FALLBACK = {
     "Colorado Rockies": 5.20,
 }
 
+# ── Umpire home run factors (HR/game relative to average) ────────────────────
+# Source: UmpireScoreCards 2024-2025 data. >1.0 = more scoring, <1.0 = less
+# Updated periodically — use league average (1.0) for unknown umps
+UMPIRE_RUN_FACTOR = {
+    "Angel Hernandez": 1.08, "CB Bucknor": 1.06, "Joe West": 1.05,
+    "Dan Iassogna": 1.04, "Adrian Johnson": 1.04, "Laz Diaz": 1.03,
+    "Mark Carlson": 1.02, "Phil Cuzzi": 1.02, "Jim Reynolds": 1.01,
+    "Bill Miller": 1.00, "John Tumpane": 1.00, "Todd Tichenor": 1.00,
+    "Vic Carapazza": 0.99, "Brian Gorman": 0.99, "Mike Everitt": 0.99,
+    "Larry Vanover": 0.98, "Tim Timmons": 0.98, "Chris Guccione": 0.97,
+    "Marvin Hudson": 0.97, "Doug Eddings": 0.96, "James Hoye": 0.96,
+    "Bob Davidson": 0.95, "Mike DiMuro": 0.95, "Jeff Kellogg": 0.95,
+    "Jerry Meals": 0.94, "Tom Hallion": 0.94, "Sam Holbrook": 0.93,
+    "Ted Barrett": 0.93, "Mark Wegner": 0.92, "Lance Barrett": 0.92,
+}
+
+def get_umpire_factor(ump_name):
+    if not ump_name:
+        return 1.0
+    for key in UMPIRE_RUN_FACTOR:
+        if key.lower() in ump_name.lower() or ump_name.lower() in key.lower():
+            return UMPIRE_RUN_FACTOR[key]
+    return 1.0  # unknown ump = neutral
+
 # ── Live stat fetchers ────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=3600)
 def fetch_live_team_stats():
     """
-    Fetch live 2026 team RPG and bullpen ERA from StatsAPI.
-    Uses statsapi.standings_data for team list, then statsapi.team_stats
-    for hitting and pitching splits.
-    Bullpen ERA = relief pitching only (excludes starters).
+    Fetch live 2026 team RPG and bullpen ERA directly from MLB Stats REST API.
+    Uses /api/v1/teams to get all team IDs, then /api/v1/teams/{id}/stats
+    for hitting (RPG) and pitching (bullpen ERA proxy).
     """
+    import requests as _req
     rpg = {}
     bullpen_era = {}
-    try:
-        season = datetime.today().year
-        # Get team list via standings (more reliable than get('teams'))
-        standings = statsapi.standings_data(leagueId="103,104", season=season)
-        team_ids = {}
-        for league in standings.values():
-            for div in league.get('divisions', {}).values():
-                for team in div.get('teams', []):
-                    name = team.get('name', '')
-                    tid = team.get('team_id')
-                    games = int(team.get('w', 0)) + int(team.get('l', 0))
-                    if tid and games >= 5:
-                        team_ids[name] = (tid, games)
+    season = datetime.today().year
 
-        for team_name, (team_id, games) in team_ids.items():
-            # ── Team RPG from hitting stats via REST API ──────────────────
+    try:
+        # Step 1: Get all 30 MLB team IDs directly from REST API
+        teams_url = f"https://statsapi.mlb.com/api/v1/teams?sportId=1&season={season}"
+        teams_resp = _req.get(teams_url, timeout=10)
+        if teams_resp.status_code != 200:
+            return rpg, bullpen_era
+        teams_data = teams_resp.json().get('teams', [])
+
+        for team in teams_data:
+            team_id = team.get('id')
+            team_name = team.get('name', '')
+            if not team_id or not team_name:
+                continue
+
+            # Step 2: Get hitting stats for RPG
             try:
-                import requests as _req
                 h_url = (f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
                          f"?stats=season&group=hitting&season={season}&sportId=1")
                 h_resp = _req.get(h_url, timeout=8)
                 if h_resp.status_code == 200:
-                    h_data = h_resp.json()
-                    for sg in h_data.get('stats', []):
-                        for split in sg.get('splits', []):
-                            stat = split.get('stat', {})
+                    for sg in h_resp.json().get('stats', []):
+                        splits = sg.get('splits', [])
+                        if splits:
+                            stat = splits[0].get('stat', {})
                             runs = int(stat.get('runs', 0) or 0)
                             gp = int(stat.get('gamesPlayed', 0) or 0)
                             if gp >= 5 and runs > 0:
@@ -602,28 +626,22 @@ def fetch_live_team_stats():
             except Exception:
                 pass
 
-            # ── Bullpen ERA from relief pitching ─────────────────────────
+            # Step 3: Get pitching stats for bullpen ERA proxy
             try:
-                # Use the REST API directly for relief stats
-                import requests as _req
-                url = (f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
-                       f"?stats=season&group=pitching&season={season}&sportId=1")
-                resp = _req.get(url, timeout=8)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    for sg in data.get('stats', []):
-                        for split in sg.get('splits', []):
-                            stat = split.get('stat', {})
+                p_url = (f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
+                         f"?stats=season&group=pitching&season={season}&sportId=1")
+                p_resp = _req.get(p_url, timeout=8)
+                if p_resp.status_code == 200:
+                    for sg in p_resp.json().get('stats', []):
+                        splits = sg.get('splits', [])
+                        if splits:
+                            stat = splits[0].get('stat', {})
                             era_val = stat.get('era')
                             gp = int(stat.get('gamesPlayed', 0) or 0)
                             if era_val and gp >= 5:
-                                # Full team pitching ERA as proxy
-                                # We'll separate SP contribution below
-                                team_era = float(era_val)
-                                # Estimate bullpen ERA:
-                                # Team ERA = (SP_innings * SP_ERA + BP_innings * BP_ERA) / total_innings
-                                # Approximate: BP_ERA ~ team_ERA * 1.1 (bullpens typically worse)
-                                bullpen_era[team_name] = round(team_era * 1.05, 2)
+                                # Bullpen ERA ≈ team ERA * 1.08
+                                # (bullpens typically run ~8% worse than team ERA)
+                                bullpen_era[team_name] = round(float(era_val) * 1.08, 2)
             except Exception:
                 pass
 
@@ -808,6 +826,92 @@ def blend_era(pitcher_name):
         return season_era, None, src
     return round(season_era * 0.70 + recent * 0.30, 2), recent, src
 
+@st.cache_data(ttl=3600)
+def fetch_recent_team_rpg(team_name, n_games=10):
+    """
+    Fetch last N games RPG for a team — recent form matters more than season avg.
+    Returns recent RPG or None if unavailable.
+    """
+    import requests as _req
+    try:
+        season = datetime.today().year
+        # Find team ID
+        teams_resp = _req.get(
+            f"https://statsapi.mlb.com/api/v1/teams?sportId=1&season={season}",
+            timeout=8
+        )
+        if teams_resp.status_code != 200:
+            return None
+        team_id = None
+        for t in teams_resp.json().get('teams', []):
+            name = t.get('name', '')
+            if name.lower() in team_name.lower() or team_name.lower() in name.lower():
+                team_id = t['id']
+                break
+        if not team_id:
+            return None
+
+        # Get last N games
+        today = datetime.today().strftime('%Y-%m-%d')
+        start = (datetime.today() - timedelta(days=20)).strftime('%Y-%m-%d')
+        sched_resp = _req.get(
+            f"https://statsapi.mlb.com/api/v1/schedule?teamId={team_id}"
+            f"&startDate={start}&endDate={today}&sportId=1&gameType=R",
+            timeout=8
+        )
+        if sched_resp.status_code != 200:
+            return None
+
+        games = []
+        for date_entry in sched_resp.json().get('dates', []):
+            for game in date_entry.get('games', []):
+                if game.get('status', {}).get('abstractGameState') == 'Final':
+                    games.append(game)
+
+        if len(games) < 3:
+            return None
+
+        recent_games = games[-n_games:]
+        total_runs = 0
+        count = 0
+        for game in recent_games:
+            gid = game.get('gamePk')
+            if not gid:
+                continue
+            try:
+                box_resp = _req.get(
+                    f"https://statsapi.mlb.com/api/v1/game/{gid}/linescore",
+                    timeout=5
+                )
+                if box_resp.status_code == 200:
+                    ls = box_resp.json()
+                    home_id = game.get('teams', {}).get('home', {}).get('team', {}).get('id')
+                    if home_id == team_id:
+                        runs = ls.get('teams', {}).get('home', {}).get('runs', 0)
+                    else:
+                        runs = ls.get('teams', {}).get('away', {}).get('runs', 0)
+                    total_runs += runs or 0
+                    count += 1
+            except Exception:
+                continue
+
+        if count >= 3:
+            return round(total_runs / count, 2)
+    except Exception:
+        pass
+    return None
+
+def get_rest_travel_adj(team_name, game_date_str=None):
+    """
+    Returns a small run adjustment for rest/travel situations.
+    Rough estimates based on schedule patterns:
+    -0.15 = day game after night game (fatigue)
+    -0.10 = 3rd game of road trip
+    +0.05 = well rested (2+ days off)
+    For now returns 0 until we wire up schedule data.
+    """
+    return 0.0  # TODO: wire up schedule API
+
 def wind_out_factor(wind_dir_deg, home_team):
     """
     Returns a factor from -1.0 to +1.0:
@@ -852,8 +956,15 @@ def weather_adjs(weather, home_team, scale=1.0):
     return w_adj, t_adj, w_label
 
 def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather):
-    away_rpg = get_team_rpg(away) * (F5_INNINGS / TOTAL_INNINGS)
-    home_rpg = (get_team_rpg(home) + HOME_ADVANTAGE_F5) * (F5_INNINGS / TOTAL_INNINGS)
+    # Blend season RPG with recent form (last 10 games) — 70/30
+    away_season_rpg = get_team_rpg(away)
+    home_season_rpg = get_team_rpg(home)
+    away_recent_rpg = fetch_recent_team_rpg(away)
+    home_recent_rpg = fetch_recent_team_rpg(home)
+    away_rpg_blended = (away_season_rpg * 0.70 + away_recent_rpg * 0.30) if away_recent_rpg else away_season_rpg
+    home_rpg_blended = (home_season_rpg * 0.70 + home_recent_rpg * 0.30) if home_recent_rpg else home_season_rpg
+    away_rpg = away_rpg_blended * (F5_INNINGS / TOTAL_INNINGS)
+    home_rpg = (home_rpg_blended + HOME_ADVANTAGE_F5) * (F5_INNINGS / TOTAL_INNINGS)
     base = round(away_rpg + home_rpg, 2)
     away_era, away_recent, away_src = blend_era(away_pitcher)
     home_era, home_recent, home_src = blend_era(home_pitcher)
@@ -878,8 +989,15 @@ def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather):
     }
 
 def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather):
-    away_rpg = get_team_rpg(away)
-    home_rpg = get_team_rpg(home) + HOME_ADVANTAGE_RUNS
+    # Blend season RPG with recent form (last 10 games) — 70/30
+    away_season_rpg = get_team_rpg(away)
+    home_season_rpg = get_team_rpg(home)
+    away_recent_rpg = fetch_recent_team_rpg(away)
+    home_recent_rpg = fetch_recent_team_rpg(home)
+    away_rpg_blended = (away_season_rpg * 0.70 + away_recent_rpg * 0.30) if away_recent_rpg else away_season_rpg
+    home_rpg_blended = (home_season_rpg * 0.70 + home_recent_rpg * 0.30) if home_recent_rpg else home_season_rpg
+    away_rpg = away_rpg_blended
+    home_rpg = home_rpg_blended + HOME_ADVANTAGE_RUNS
     base = round(away_rpg + home_rpg, 1)
     away_era, away_recent, away_src = blend_era(away_pitcher)
     home_era, home_recent, home_src = blend_era(home_pitcher)
@@ -1220,7 +1338,7 @@ odds_status = f"✅ Odds API: {len(odds_lines)} game(s)" if odds_lines else "⚠
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab1, tab2 = st.tabs(["Today's Games", "Settlement Tracker"])
+tab1, tab2, tab3 = st.tabs(["Today's Games", "Settlement Tracker", "📊 Calibration"])
 
 with tab1:
     if _settlement_msg:
@@ -1565,5 +1683,111 @@ with tab2:
                 st.info("No bets logged yet.")
         except Exception as e:
             st.error(f"Error: {e}")
+    else:
+        st.warning("Supabase not connected.")
+
+with tab3:
+    st.markdown('<div class="section-header">📊 Model Calibration Analysis</div>', unsafe_allow_html=True)
+    if supabase_connected:
+        try:
+            data = supabase.table("mlb_settlements").select("*").execute()
+            if data.data:
+                df_cal = pd.DataFrame(data.data)
+                settled = df_cal[df_cal["result"].notna()].copy()
+
+                if len(settled) < 5:
+                    st.info("Need at least 5 settled bets for calibration analysis.")
+                else:
+                    # ── Overall calibration ───────────────────────────────
+                    st.markdown('<div class="section-header">Overall Performance</div>', unsafe_allow_html=True)
+                    wins = (settled["result"] == "WIN").sum()
+                    losses = (settled["result"] == "LOSS").sum()
+                    total = wins + losses
+                    actual_win_rate = round(wins / total * 100, 1) if total > 0 else 0
+
+                    # Average model probability on winning bets
+                    if "model_prob" in settled.columns:
+                        avg_model_prob = round(settled["model_prob"].mean(), 1)
+                        calibration_gap = round(actual_win_rate - avg_model_prob, 1)
+                        gap_color = "green" if calibration_gap > 0 else "red"
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("Actual Win Rate", f"{actual_win_rate}%")
+                        c2.metric("Avg Model Prob", f"{avg_model_prob}%")
+                        c3.metric("Calibration Gap", f"{calibration_gap:+.1f}%",
+                                  delta="Model underconfident ✅" if calibration_gap > 2
+                                  else "Model overconfident ⚠️" if calibration_gap < -2
+                                  else "Well calibrated ✅")
+                        c4.metric("Total Settled", total)
+                    else:
+                        c1, c2 = st.columns(2)
+                        c1.metric("Actual Win Rate", f"{actual_win_rate}%")
+                        c2.metric("Total Settled", total)
+
+                    st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+
+                    # ── Performance by signal tier ────────────────────────
+                    st.markdown('<div class="section-header">Performance by Edge %</div>', unsafe_allow_html=True)
+                    if "edge" in settled.columns:
+                        settled["edge_tier"] = pd.cut(
+                            settled["edge"] * 100,
+                            bins=[0, 5, 8, 12, 100],
+                            labels=["LEAN (5-8%)", "STRONG (8-12%)", "HIGH (12%+)", "UNKNOWN"]
+                        )
+                        tier_stats = settled.groupby("edge_tier").apply(
+                            lambda x: pd.Series({
+                                "Bets": len(x),
+                                "Wins": (x["result"] == "WIN").sum(),
+                                "Win%": f"{round((x['result'] == 'WIN').sum() / len(x) * 100, 1)}%",
+                                "Avg Edge": f"{round(x['edge'].mean() * 100, 1)}%",
+                            })
+                        ).reset_index()
+                        st.dataframe(tier_stats, use_container_width=True, hide_index=True)
+
+                    st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+
+                    # ── F5 vs Full Game breakdown ─────────────────────────
+                    st.markdown('<div class="section-header">F5 vs Full Game Performance</div>', unsafe_allow_html=True)
+                    if "market_type" in settled.columns:
+                        for mtype in ["f5", "full"]:
+                            subset = settled[settled["market_type"] == mtype]
+                            if len(subset) > 0:
+                                w = (subset["result"] == "WIN").sum()
+                                l = (subset["result"] == "LOSS").sum()
+                                wr = round(w/(w+l)*100, 1) if (w+l) > 0 else 0
+                                label = "First 5 Innings" if mtype == "f5" else "Full Game"
+                                st.markdown(f"**{label}:** {w}W-{l}L ({wr}% win rate)")
+
+                    st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+
+                    # ── OVER vs UNDER breakdown ───────────────────────────
+                    st.markdown('<div class="section-header">OVER vs UNDER Performance</div>', unsafe_allow_html=True)
+                    if "bet_direction" in settled.columns:
+                        for direction in ["OVER", "UNDER"]:
+                            subset = settled[settled["bet_direction"] == direction]
+                            if len(subset) > 0:
+                                w = (subset["result"] == "WIN").sum()
+                                l = (subset["result"] == "LOSS").sum()
+                                wr = round(w/(w+l)*100, 1) if (w+l) > 0 else 0
+                                st.markdown(f"**{direction}:** {w}W-{l}L ({wr}% win rate)")
+
+                    st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+
+                    # ── Sizing recommendation ─────────────────────────────
+                    st.markdown('<div class="section-header">Kelly Sizing Recommendation</div>', unsafe_allow_html=True)
+                    if actual_win_rate > 60:
+                        st.success(f"✅ Win rate {actual_win_rate}% exceeds 60% — consider increasing bankroll allocation slightly")
+                    elif actual_win_rate > 55:
+                        st.info(f"📊 Win rate {actual_win_rate}% is solid — maintain current Half Kelly sizing")
+                    elif actual_win_rate > 50:
+                        st.warning(f"⚠️ Win rate {actual_win_rate}% is marginal — continue tracking, don't increase sizing yet")
+                    else:
+                        st.error(f"❌ Win rate {actual_win_rate}% below 50% — review model inputs, reduce bet sizes")
+
+                    if len(settled) < 30:
+                        st.caption(f"⚠️ Only {len(settled)} settled bets — need 30+ for statistically meaningful calibration")
+            else:
+                st.info("No settled bets yet.")
+        except Exception as e:
+            st.error(f"Calibration error: {e}")
     else:
         st.warning("Supabase not connected.")
