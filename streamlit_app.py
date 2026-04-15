@@ -103,11 +103,8 @@ TOTAL_INNINGS = 9.0
 F5_INNINGS = 5.0
 DEFAULT_FG_LINE = 8.5
 DEFAULT_F5_LINE = 4.5
-
-# ── V4.33 #1: Early season ERA blend — 50/50 recent vs season ────────────────
 SEASON_ERA_WEIGHT = 0.50
 RECENT_ERA_WEIGHT = 0.50
-# RPG blend — 60/40 (recent team form matters but season sample larger)
 SEASON_RPG_WEIGHT = 0.60
 RECENT_RPG_WEIGHT = 0.40
 
@@ -147,7 +144,6 @@ PARK_FACTORS = {
 HOME_ADVANTAGE_RUNS = 0.20
 HOME_ADVANTAGE_F5 = 0.10
 
-# ── V4.33 #5: Team home/away RPG splits — 2025 baseline ─────────────────────
 TEAM_HOME_AWAY_SPLITS = {
     "Los Angeles Dodgers":   (5.4, 4.8), "Atlanta Braves":        (5.2, 4.8),
     "New York Yankees":      (5.0, 4.4), "Philadelphia Phillies": (5.1, 4.7),
@@ -179,8 +175,6 @@ def get_team_away_rpg(team_name):
             return TEAM_HOME_AWAY_SPLITS[key][1]
     return get_team_rpg(team_name)
 
-# ── V4.33 #3: Team offensive splits vs LHP/RHP — 2025 baseline ──────────────
-# (runs_vs_RHP_factor, runs_vs_LHP_factor)
 TEAM_HANDEDNESS_SPLITS = {
     "New York Yankees":      (0.98, 1.08), "Boston Red Sox":        (1.02, 1.05),
     "Toronto Blue Jays":     (1.01, 1.03), "Baltimore Orioles":     (0.99, 1.02),
@@ -207,10 +201,7 @@ def get_handedness_factor(team_name, pitcher_hand):
             return rhp_factor if pitcher_hand == "R" else lhp_factor
     return 1.0
 
-# ── V4.33 #4: Pitcher rest days ERA adjustment ────────────────────────────────
-REST_ERA_ADJ = {
-    3: +0.40, 4: +0.15, 5: 0.00, 6: +0.10, 7: +0.20, 8: +0.30,
-}
+REST_ERA_ADJ = {3: +0.40, 4: +0.15, 5: 0.00, 6: +0.10, 7: +0.20, 8: +0.30}
 
 @st.cache_data(ttl=3600)
 def get_rest_adj(pitcher_name, game_date_str=None):
@@ -218,18 +209,14 @@ def get_rest_adj(pitcher_name, game_date_str=None):
         return 0.0, None
     try:
         results = statsapi.lookup_player(pitcher_name)
-        if not results:
-            return 0.0, None
+        if not results: return 0.0, None
         player_id = results[0]['id']
         logs = statsapi.player_stat_data(player_id, group='pitching', type='gameLog', sportId=1)
-        if not logs or 'stats' not in logs:
-            return 0.0, None
+        if not logs or 'stats' not in logs: return 0.0, None
         starts = [g for g in logs['stats'] if g.get('gamesStarted', 0) >= 1]
-        if not starts:
-            return 0.0, None
+        if not starts: return 0.0, None
         last_date_str = starts[-1].get('date', '')
-        if not last_date_str:
-            return 0.0, None
+        if not last_date_str: return 0.0, None
         last_date = datetime.strptime(last_date_str, '%Y-%m-%d')
         today = datetime.strptime(game_date_str, '%Y-%m-%d') if game_date_str else datetime.now()
         days_rest = min((today - last_date).days, 8)
@@ -237,7 +224,6 @@ def get_rest_adj(pitcher_name, game_date_str=None):
     except Exception:
         return 0.0, None
 
-# ── V4.33 Umpire factor — now wired into calculations ────────────────────────
 UMPIRE_RUN_FACTOR = {
     "Angel Hernandez": 1.08, "CB Bucknor": 1.06, "Joe West": 1.05,
     "Dan Iassogna": 1.04, "Adrian Johnson": 1.04, "Laz Diaz": 1.03,
@@ -256,8 +242,7 @@ UMPIRE_RUN_FACTOR = {
 }
 
 def get_umpire_factor(ump_name):
-    if not ump_name:
-        return 1.0
+    if not ump_name: return 1.0
     for key in UMPIRE_RUN_FACTOR:
         if key.lower() in ump_name.lower() or ump_name.lower() in key.lower():
             return UMPIRE_RUN_FACTOR[key]
@@ -268,12 +253,10 @@ def fetch_todays_umpires():
     import requests as _req
     result = {}
     try:
-        today = today_et()
         resp = _req.get(
-            f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
+            f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today_et()}"
             f"&hydrate=officials&gameType=R", timeout=8)
-        if resp.status_code != 200:
-            return result
+        if resp.status_code != 200: return result
         for date_entry in resp.json().get('dates', []):
             for game in date_entry.get('games', []):
                 gid = str(game.get('gamePk', ''))
@@ -423,8 +406,7 @@ def get_lineup_lhh_pct(team_name):
 
 def platoon_adj(pitcher_name, opposing_team):
     hand = PITCHER_HAND.get(pitcher_name)
-    if not hand:
-        return 0.0
+    if not hand: return 0.0
     lhh_pct = get_lineup_lhh_pct(opposing_team)
     NEUTRAL_LHH = 0.44
     if hand == "R":
@@ -464,8 +446,7 @@ TEAM_BULLPEN_FALLBACK = {
 @st.cache_data(ttl=3600)
 def fetch_live_team_stats():
     import requests as _req
-    rpg = {}
-    bullpen_era = {}
+    rpg, bullpen_era = {}, {}
     season = datetime.today().year
     try:
         teams_resp = _req.get(
@@ -543,19 +524,15 @@ def fetch_recent_era(pitcher_name):
         return None
     try:
         results = statsapi.lookup_player(pitcher_name)
-        if not results:
-            return None
+        if not results: return None
         player_id = results[0]['id']
         logs = statsapi.player_stat_data(player_id, group='pitching', type='gameLog', sportId=1)
-        if not logs or 'stats' not in logs:
-            return None
+        if not logs or 'stats' not in logs: return None
         starts = [g for g in logs['stats'] if g.get('gamesStarted', 0) >= 1][-3:]
-        if not starts:
-            return None
+        if not starts: return None
         total_er = sum(float(g.get('earnedRuns', 0)) for g in starts)
         total_ip = sum(float(g.get('inningsPitched', 0)) for g in starts)
-        if total_ip < 3:
-            return None
+        if total_ip < 3: return None
         return round((total_er / total_ip) * 9, 2)
     except Exception:
         return None
@@ -568,14 +545,12 @@ WIND_DIR_LABELS = {
 
 def deg_to_label(deg):
     if deg is None: return ""
-    closest = min(WIND_DIR_LABELS.keys(), key=lambda x: abs(x - deg))
-    return WIND_DIR_LABELS[closest]
+    return WIND_DIR_LABELS[min(WIND_DIR_LABELS.keys(), key=lambda x: abs(x - deg))]
 
 @st.cache_data(ttl=1800)
 def fetch_stadium_weather(home_team, game_hour_utc=None):
     coords = STADIUM_COORDS.get(home_team)
-    if coords is None:
-        return {"dome": True}
+    if coords is None: return {"dome": True}
     lat, lon = coords
     try:
         resp = requests.get("https://api.open-meteo.com/v1/forecast", params={
@@ -597,7 +572,8 @@ def fetch_stadium_weather(home_team, game_hour_utc=None):
             try:
                 if int(t.split("T")[1][:2]) <= target_hour:
                     best_idx = i
-            except Exception: continue
+            except Exception:
+                continue
         temp = temps[best_idx] if temps else None
         wspeed = wspeeds[best_idx] if wspeeds else 0
         wdir = wdirs[best_idx] if wdirs else 0
@@ -622,18 +598,16 @@ with st.sidebar:
     if _odds_key:
         st.caption(f"Prefix: {_odds_key[:6]}…")
     st.markdown("**Weather:** ✅ Open-Meteo (free)")
-    st.markdown(f"**Umpires fetched:** {'✅' if _todays_umps else '⚠️'} {len(_todays_umps)} games")
+    st.markdown(f"**Umpires:** {'✅' if _todays_umps else '⚠️'} {len(_todays_umps)} games")
     st.markdown("---")
-    rpg_count = len(_live_rpg)
-    bp_count = len(_live_bullpen)
-    st.markdown(f"**Live RPG:** {'✅' if rpg_count >= 20 else '⚠️'} {rpg_count} teams")
-    st.markdown(f"**Live Bullpen ERA:** {'✅' if bp_count >= 20 else '⚠️'} {bp_count} teams")
+    st.markdown(f"**Live RPG:** {'✅' if len(_live_rpg) >= 20 else '⚠️'} {len(_live_rpg)} teams")
+    st.markdown(f"**Live Bullpen ERA:** {'✅' if len(_live_bullpen) >= 20 else '⚠️'} {len(_live_bullpen)} teams")
     st.caption("Live stats kick in after ≥5 games played.")
     st.markdown("---")
     st.markdown("**V4.33 Improvements:**")
     st.caption("✅ 50/50 ERA blend (early season)")
     st.caption("✅ Team vs LHP/RHP splits")
-    st.caption("✅ Pitcher rest days wired in")
+    st.caption("✅ Pitcher rest days")
     st.caption("✅ Umpire factor wired in")
     st.caption("✅ Home/away team splits")
 
@@ -666,7 +640,6 @@ def blend_era(pitcher_name):
     recent = fetch_recent_era(pitcher_name)
     if recent is None:
         return season_era, None, src
-    # V4.33 #1: 50/50 blend early season
     return round(season_era * SEASON_ERA_WEIGHT + recent * RECENT_ERA_WEIGHT, 2), recent, src
 
 @st.cache_data(ttl=3600)
@@ -706,7 +679,8 @@ def fetch_recent_team_rpg(team_name, n_games=10):
                     side = 'home' if home_id == team_id else 'away'
                     total_runs += ls.get('teams', {}).get(side, {}).get('runs', 0) or 0
                     count += 1
-            except Exception: continue
+            except Exception:
+                continue
         return round(total_runs / count, 2) if count >= 3 else None
     except Exception:
         return None
@@ -725,7 +699,6 @@ def weather_adjs(weather, home_team, scale=1.0):
     wspeed = weather.get("wind_speed_mph") or 0
     wdir = weather.get("wind_dir_deg") or 0
     w_adj, w_label = 0.0, None
-    # V4.33: wind effect threshold raised to 8mph (was 5mph)
     if wspeed and wspeed >= 8:
         factor = wind_out_factor(wdir, home_team)
         w_adj = round(factor * (wspeed / 10) * 0.3 * scale, 2)
@@ -734,13 +707,11 @@ def weather_adjs(weather, home_team, scale=1.0):
         else: w_label = "💨 Crosswind"
     temp = weather.get("temp_f")
     t_adj = 0.0
-    # V4.33: temp effect starts at 60°F (was 50°F), scales more gradually
     if temp and temp < 60:
         t_adj = round((60 - temp) * -0.015 * scale, 2)
     return w_adj, t_adj, w_label
 
 def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, game_date=None):
-    # V4.33 #5: Use home/away specific splits instead of flat home advantage
     away_season_rpg = get_team_away_rpg(away)
     home_season_rpg = get_team_home_rpg(home)
     away_recent_rpg = fetch_recent_team_rpg(away)
@@ -749,44 +720,29 @@ def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, g
     home_rpg_blended = (home_season_rpg * SEASON_RPG_WEIGHT + home_recent_rpg * RECENT_RPG_WEIGHT) if home_recent_rpg else home_season_rpg
     away_rpg = away_rpg_blended * (F5_INNINGS / TOTAL_INNINGS)
     home_rpg = home_rpg_blended * (F5_INNINGS / TOTAL_INNINGS)
-    base = round(away_rpg + home_rpg, 2)
-
     away_era, away_recent, away_src = blend_era(away_pitcher)
     home_era, home_recent, home_src = blend_era(home_pitcher)
-
-    # V4.33 #4: Rest days adjustment
     away_rest_adj, away_days_rest = get_rest_adj(away_pitcher, game_date)
     home_rest_adj, home_days_rest = get_rest_adj(home_pitcher, game_date)
-
-    # Platoon adj
     away_platoon = platoon_adj(away_pitcher, home)
     home_platoon = platoon_adj(home_pitcher, away)
-
-    # V4.33 #3: Handedness offensive splits
     away_hand = PITCHER_HAND.get(away_pitcher, "R")
     home_hand = PITCHER_HAND.get(home_pitcher, "R")
-    home_bat_vs_away_pitcher = get_handedness_factor(home, away_hand)
-    away_bat_vs_home_pitcher = get_handedness_factor(away, home_hand)
-
+    home_bat_factor = get_handedness_factor(home, away_hand)
+    away_bat_factor = get_handedness_factor(away, home_hand)
     away_era_adj = away_era + away_platoon + away_rest_adj
     home_era_adj = home_era + home_platoon + home_rest_adj
     away_sp_adj = round(((away_era_adj - LEAGUE_AVG_ERA) / 9) * F5_INNINGS * 0.5, 2)
     home_sp_adj = round(((home_era_adj - LEAGUE_AVG_ERA) / 9) * F5_INNINGS * 0.5, 2)
-
-    # Apply handedness offensive factor to base RPG
-    away_rpg_final = away_rpg * away_bat_vs_home_pitcher
-    home_rpg_final = home_rpg * home_bat_vs_away_pitcher
+    away_rpg_final = away_rpg * away_bat_factor
+    home_rpg_final = home_rpg * home_bat_factor
     base_adj = round(away_rpg_final + home_rpg_final, 2)
-
     w_adj, t_adj, w_label = weather_adjs(weather, home, scale=F5_INNINGS / TOTAL_INNINGS)
-
-    # V4.33 Umpire factor
     ump_name = _todays_umps.get(str(game_id), "") if game_id else ""
     ump_factor = get_umpire_factor(ump_name)
-
     raw = (base_adj + away_sp_adj + home_sp_adj + w_adj + t_adj) * ump_factor
     return {
-        "total": round(raw * pf, 1), "base": base,
+        "total": round(raw * pf, 1), "base": base_adj,
         "away_era": away_era, "away_recent": away_recent, "away_src": away_src,
         "home_era": home_era, "home_recent": home_recent, "home_src": home_src,
         "away_sp_adj": away_sp_adj, "home_sp_adj": home_sp_adj,
@@ -799,56 +755,40 @@ def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, g
     }
 
 def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, game_date=None):
-    # V4.33 #5: Home/away splits
     away_season_rpg = get_team_away_rpg(away)
     home_season_rpg = get_team_home_rpg(home)
     away_recent_rpg = fetch_recent_team_rpg(away)
     home_recent_rpg = fetch_recent_team_rpg(home)
     away_rpg_blended = (away_season_rpg * SEASON_RPG_WEIGHT + away_recent_rpg * RECENT_RPG_WEIGHT) if away_recent_rpg else away_season_rpg
     home_rpg_blended = (home_season_rpg * SEASON_RPG_WEIGHT + home_recent_rpg * RECENT_RPG_WEIGHT) if home_recent_rpg else home_season_rpg
-    base = round(away_rpg_blended + home_rpg_blended, 1)
-
     away_era, away_recent, away_src = blend_era(away_pitcher)
     home_era, home_recent, home_src = blend_era(home_pitcher)
-
-    # V4.33 #4: Rest days
     away_rest_adj, away_days_rest = get_rest_adj(away_pitcher, game_date)
     home_rest_adj, home_days_rest = get_rest_adj(home_pitcher, game_date)
-
     away_platoon = platoon_adj(away_pitcher, home)
     home_platoon = platoon_adj(home_pitcher, away)
-
-    # V4.33 #3: Handedness splits
     away_hand = PITCHER_HAND.get(away_pitcher, "R")
     home_hand = PITCHER_HAND.get(home_pitcher, "R")
-    home_bat_vs_away_pitcher = get_handedness_factor(home, away_hand)
-    away_bat_vs_home_pitcher = get_handedness_factor(away, home_hand)
-
+    home_bat_factor = get_handedness_factor(home, away_hand)
+    away_bat_factor = get_handedness_factor(away, home_hand)
     away_era_adj = away_era + away_platoon + away_rest_adj
     home_era_adj = home_era + home_platoon + home_rest_adj
     away_sp_adj = round(((away_era_adj - LEAGUE_AVG_ERA) / 9) * SP_INNINGS * 0.5, 2)
     home_sp_adj = round(((home_era_adj - LEAGUE_AVG_ERA) / 9) * SP_INNINGS * 0.5, 2)
-
     away_bp_era = get_bullpen_era(away)
     home_bp_era = get_bullpen_era(home)
     bp_inn = TOTAL_INNINGS - SP_INNINGS
     away_bp_adj = round(((away_bp_era - LEAGUE_AVG_BULLPEN_ERA) / 9) * bp_inn, 2)
     home_bp_adj = round(((home_bp_era - LEAGUE_AVG_BULLPEN_ERA) / 9) * bp_inn, 2)
-
-    # Apply handedness offensive factor
-    away_rpg_final = away_rpg_blended * away_bat_vs_home_pitcher
-    home_rpg_final = home_rpg_blended * home_bat_vs_away_pitcher
+    away_rpg_final = away_rpg_blended * away_bat_factor
+    home_rpg_final = home_rpg_blended * home_bat_factor
     base_adj = round(away_rpg_final + home_rpg_final, 1)
-
     w_adj, t_adj, w_label = weather_adjs(weather, home, scale=1.0)
-
-    # V4.33 Umpire factor
     ump_name = _todays_umps.get(str(game_id), "") if game_id else ""
     ump_factor = get_umpire_factor(ump_name)
-
     raw = (base_adj + away_sp_adj + home_sp_adj + away_bp_adj + home_bp_adj + w_adj + t_adj) * ump_factor
     return {
-        "total": round(raw * pf, 1), "base": base,
+        "total": round(raw * pf, 1), "base": base_adj,
         "away_era": away_era, "away_recent": away_recent, "away_src": away_src,
         "home_era": home_era, "home_recent": home_recent, "home_src": home_src,
         "away_sp_adj": away_sp_adj, "home_sp_adj": home_sp_adj,
@@ -897,7 +837,6 @@ def calc_kelly(edge):
 
 def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
                  away_pitcher, home_pitcher, market_type, today):
-    # V4.32: Default line protection
     _is_default = (market_type == "full" and line == DEFAULT_FG_LINE and not odds_lines) or \
                   (market_type == "f5" and line == DEFAULT_F5_LINE and not odds_lines)
     if _is_default:
@@ -1009,12 +948,16 @@ def run_auto_settlement():
         if not rows: return None
         settled, skipped = 0, 0
         for row in rows:
-            score = fetch_final_score(game_id=row.get("game_id"), game_date=row.get("game_date"),
-                                       away_team=row.get("away_team"), home_team=row.get("home_team"))
-            if not score: skipped += 1; continue
+            score = fetch_final_score(
+                game_id=row.get("game_id"), game_date=row.get("game_date"),
+                away_team=row.get("away_team"), home_team=row.get("home_team"))
+            if not score:
+                skipped += 1
+                continue
             ar, hr, actual = score
-            result, pnl = settle_result(actual, row.get("kalshi_line"), row.get("bet_direction"),
-                                         row.get("bet_amount", 0), row.get("kalshi_over_price", 50))
+            result, pnl = settle_result(
+                actual, row.get("kalshi_line"), row.get("bet_direction"),
+                row.get("bet_amount", 0), row.get("kalshi_over_price", 50))
             try:
                 supabase.table("mlb_settlements").update({
                     "actual_total": actual, "away_score": ar, "home_score": hr,
@@ -1022,11 +965,13 @@ def run_auto_settlement():
                     "settled_at": datetime.utcnow().isoformat(),
                 }).eq("id", row["id"]).execute()
                 settled += 1
-            except Exception: skipped += 1
+            except Exception:
+                skipped += 1
         msg = f"✅ Auto-settlement: {settled} settled"
         if skipped: msg += f", {skipped} skipped"
         return msg
-    except Exception: return None
+    except Exception:
+        return None
 
 @st.cache_data(ttl=60)
 def fetch_kalshi_lines():
@@ -1078,7 +1023,8 @@ def fetch_odds_lines():
                 m = sorted(totals, key=lambda x: x["total"])[len(totals) // 2]
                 result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
         return result
-    except Exception: return {}
+    except Exception:
+        return {}
 
 def match_kalshi(away, home, lines, mtype="full"):
     for (ka, kh, kt), data in lines.items():
@@ -1138,18 +1084,6 @@ with tab1:
                     _pf_str = f"{_pf:.2f} {'🏔️' if _pf>=1.04 else '⬆️' if _pf>1.0 else '➡️' if _pf==1.0 else '⬇️'}"
                     _f5d = round(_f5["total"] - _f5_line, 1)
                     _fgd = round(_fg["total"] - _fg_line, 1)
-
-                    def _signal(diff, edge, line, mtype):
-                        blocked = (mtype == "full" and line == DEFAULT_FG_LINE and not odds_lines) or \
-                                  (mtype == "f5" and line == DEFAULT_F5_LINE and not odds_lines)
-                        if blocked: return "⛔ DEFAULT LINE", "⚪"
-                        lean = "OVER" if diff > 0.3 else "UNDER" if diff < -0.3 else "EVEN"
-                        if lean == "EVEN" or abs(edge) < EDGE_THRESHOLD: return "⚪ NO EDGE", "⚪"
-                        ep = round(abs(edge) * 100, 1)
-                        tier = "🔥 HIGH" if ep >= 12 else "💪 STRONG" if ep >= 8 else "👍 LEAN"
-                        direction = "🟢 OVER" if lean == "OVER" else "🔴 UNDER"
-                        return tier, direction
-
                     _k5_price = _k5["over_price_cents"] if _k5 else 50
                     _kf_price = _kf["over_price_cents"] if _kf else 50
                     _f5_prob = model_to_prob(_f5["total"], _f5_line) / 100
@@ -1158,24 +1092,60 @@ with tab1:
                     _fg_lean = "OVER" if _fgd > 0.3 else "UNDER" if _fgd < -0.3 else "EVEN"
                     _f5_edge = (_f5_prob - _k5_price/100) if _f5_lean == "OVER" else ((1-_f5_prob) - (1-_k5_price/100))
                     _fg_edge = (_fg_prob - _kf_price/100) if _fg_lean == "OVER" else ((1-_fg_prob) - (1-_kf_price/100))
-                    _f5_tier, _f5_dir = _signal(_f5d, _f5_edge, _f5_line, "f5")
-                    _fg_tier, _fg_dir = _signal(_fgd, _fg_edge, _fg_line, "full")
 
-                    def abbrev_team(n): parts = n.split(); return parts[-1] if parts else n
+                    _f5_default_blocked = (_f5_line == DEFAULT_F5_LINE and not odds_lines)
+                    _fg_default_blocked = (_fg_line == DEFAULT_FG_LINE and not odds_lines)
+
+                    if _f5_default_blocked:
+                        _f5_signal = "⛔ DEFAULT LINE"
+                        _f5_dir = "⚪"
+                    elif _f5_lean == "EVEN" or abs(_f5_edge) < EDGE_THRESHOLD:
+                        _f5_signal = "⚪ NO EDGE"
+                        _f5_dir = "⚪"
+                    elif abs(_f5_edge) * 100 >= 12:
+                        _f5_signal = "🔥 HIGH"
+                        _f5_dir = "🟢 OVER" if _f5_lean == "OVER" else "🔴 UNDER"
+                    elif abs(_f5_edge) * 100 >= 8:
+                        _f5_signal = "💪 STRONG"
+                        _f5_dir = "🟢 OVER" if _f5_lean == "OVER" else "🔴 UNDER"
+                    else:
+                        _f5_signal = "👍 LEAN"
+                        _f5_dir = "🟢 OVER" if _f5_lean == "OVER" else "🔴 UNDER"
+
+                    if _fg_default_blocked:
+                        _fg_signal = "⛔ DEFAULT LINE"
+                        _fg_dir = "⚪"
+                    elif _fg_lean == "EVEN" or abs(_fg_edge) < EDGE_THRESHOLD:
+                        _fg_signal = "⚪ NO EDGE"
+                        _fg_dir = "⚪"
+                    elif abs(_fg_edge) * 100 >= 12:
+                        _fg_signal = "🔥 HIGH"
+                        _fg_dir = "🟢 OVER" if _fg_lean == "OVER" else "🔴 UNDER"
+                    elif abs(_fg_edge) * 100 >= 8:
+                        _fg_signal = "💪 STRONG"
+                        _fg_dir = "🟢 OVER" if _fg_lean == "OVER" else "🔴 UNDER"
+                    else:
+                        _fg_signal = "👍 LEAN"
+                        _fg_dir = "🟢 OVER" if _fg_lean == "OVER" else "🔴 UNDER"
+
+                    def abbrev_team(n):
+                        parts = n.split()
+                        return parts[-1] if parts else n
+
                     def abbrev_pitcher(n):
                         if not n or n == "TBD": return "TBD"
-                        p = n.split(); return f"{p[0][0]}. {p[-1]}" if len(p) >= 2 else n
+                        p = n.split()
+                        return f"{p[0][0]}. {p[-1]}" if len(p) >= 2 else n
 
-                    # Umpire display
                     _ump = _f5.get("ump_name", "")
                     _ump_factor = _f5.get("ump_factor", 1.0)
-                    _ump_str = f"{_ump} ({_ump_factor:.2f})" if _ump else "Unknown"
+                    _ump_str = f"{_ump} ({_ump_factor:.2f})" if _ump else "TBA"
 
                     rows.append({
                         "Time": _et, "Matchup": f"{abbrev_team(_away)}@{abbrev_team(_home)}",
                         "Mkt": "F5", "Model": _f5["total"],
                         "Line": f"{_f5_line}{'✅' if _k5 else '~'}",
-                        "Signal": f"{_f5_dir} {_f5_tier}", "Vegas": "—",
+                        "Signal": f"{_f5_dir} {_f5_signal}", "Vegas": "—",
                         "Away SP": _ap if _ap != "TBD" else "❓",
                         "Home SP": _hp if _hp != "TBD" else "❓",
                         "Park": _pf_str, "Ump": _ump_str,
@@ -1183,7 +1153,7 @@ with tab1:
                     rows.append({
                         "Time": "", "Matchup": "", "Mkt": "FG", "Model": _fg["total"],
                         "Line": f"{_fg_line}{'✅' if _kf else '~'}",
-                        "Signal": f"{_fg_dir} {_fg_tier}",
+                        "Signal": f"{_fg_dir} {_fg_signal}",
                         "Vegas": f"{_odds['total']}" if _odds else "—",
                         "Away SP": "", "Home SP": "", "Park": "", "Ump": "",
                     })
@@ -1194,9 +1164,15 @@ with tab1:
                 st.markdown("<div class='section-header'>📋 Today's Slate</div>", unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
                 with c1:
-                    st.success(kalshi_status) if kalshi_lines else st.warning(kalshi_status)
+                    if kalshi_lines:
+                        st.success(kalshi_status)
+                    else:
+                        st.warning(kalshi_status)
                 with c2:
-                    st.success(odds_status) if odds_lines else st.warning(odds_status)
+                    if odds_lines:
+                        st.success(odds_status)
+                    else:
+                        st.warning(odds_status)
                 if not odds_lines:
                     st.error("⛔ Odds API unavailable — default lines in use. No bets will fire.")
 
@@ -1230,10 +1206,8 @@ with tab1:
                     with st.expander(f"**{away} @ {home}** — {et}"):
                         away_src = '🟢' if f5['away_src'] == 'live' else '🟡'
                         home_src = '🟢' if f5['home_src'] == 'live' else '🟡'
-
-                        # Pitcher info with rest days
-                        away_rest_str = f" | Rest: {f5['away_days_rest']}d ({f5['away_rest_adj']:+.2f} ERA)" if f5['away_days_rest'] else ""
-                        home_rest_str = f" | Rest: {f5['home_days_rest']}d ({f5['home_rest_adj']:+.2f} ERA)" if f5['home_days_rest'] else ""
+                        away_rest_str = f" | Rest: {f5['away_days_rest']}d ({f5['away_rest_adj']:+.2f})" if f5['away_days_rest'] else ""
+                        home_rest_str = f" | Rest: {f5['home_days_rest']}d ({f5['home_rest_adj']:+.2f})" if f5['home_days_rest'] else ""
                         away_plat_str = f" | Platoon: {f5['away_platoon']:+.2f}" if f5['away_platoon'] != 0.0 else ""
                         home_plat_str = f" | Platoon: {f5['home_platoon']:+.2f}" if f5['home_platoon'] != 0.0 else ""
 
@@ -1242,7 +1216,6 @@ with tab1:
                             f"**Home SP:** {hp} ({f5['home_hand']}HP) | ERA: {f5['home_era']} {home_src}{home_plat_str}{home_rest_str}"
                         )
 
-                        # Umpire display
                         ump_name = f5.get("ump_name", "")
                         ump_factor = f5.get("ump_factor", 1.0)
                         if ump_name:
@@ -1251,9 +1224,10 @@ with tab1:
                         else:
                             st.caption("👤 HP Ump: Not yet announced")
 
-                        # Weather
-                        if wx is None: wx_str = "⚠️ Weather unavailable"
-                        elif wx.get("dome"): wx_str = "🏟️ Dome — weather N/A"
+                        if wx is None:
+                            wx_str = "⚠️ Weather unavailable"
+                        elif wx.get("dome"):
+                            wx_str = "🏟️ Dome — weather N/A"
                         else:
                             temp = wx.get("temp_f")
                             ws = wx.get("wind_speed_mph", 0)
@@ -1283,8 +1257,10 @@ with tab1:
                         _k5 = match_kalshi(away, home, kalshi_lines, "f5")
                         _f5_line = float(_k5["line"]) if _k5 else DEFAULT_F5_LINE
                         _f5_price = int(_k5["over_price_cents"]) if _k5 else 50
-                        if _k5: st.success(f"✅ Kalshi F5: {_f5_line} | Over: {_f5_price}¢")
-                        else: st.caption("F5 Kalshi line not loaded — using default 4.5")
+                        if _k5:
+                            st.success(f"✅ Kalshi F5: {_f5_line} | Over: {_f5_price}¢")
+                        else:
+                            st.caption("F5 Kalshi line not loaded — using default 4.5")
 
                         f5_line_in = st.number_input("F5 Line", 0.0, 15.0, _f5_line, 0.5, key=f"f5l_{game_id}")
                         f5_price_in = st.number_input("F5 Over Price (¢)", 1, 99, _f5_price, 1, key=f"f5p_{game_id}")
@@ -1309,8 +1285,10 @@ with tab1:
                         _game_odds = match_odds(away, home, odds_lines)
                         if _game_odds:
                             st.info(f"📊 Vegas: {_game_odds['total']} | Over odds: {_game_odds['over_odds']}")
-                        if _kf: st.success(f"✅ Kalshi FG: {_fg_line} | Over: {_fg_price}¢")
-                        else: st.caption("Full game Kalshi line not loaded — using default 8.5")
+                        if _kf:
+                            st.success(f"✅ Kalshi FG: {_fg_line} | Over: {_fg_price}¢")
+                        else:
+                            st.caption("Full game Kalshi line not loaded — using default 8.5")
 
                         fg_line_in = st.number_input("FG Line", 0.0, 20.0, _fg_line, 0.5, key=f"fgl_{game_id}")
                         fg_price_in = st.number_input("FG Over Price (¢)", 1, 99, _fg_price, 1, key=f"fgp_{game_id}")
@@ -1419,7 +1397,8 @@ with tab3:
                         c2.metric("Avg Model Prob", f"{avg_model_prob}%")
                         c3.metric("Calibration Gap", f"{calibration_gap:+.1f}%",
                                   delta="Underconfident ✅" if calibration_gap > 2
-                                  else "Overconfident ⚠️" if calibration_gap < -2 else "Well calibrated ✅")
+                                  else "Overconfident ⚠️" if calibration_gap < -2
+                                  else "Well calibrated ✅")
                         c4.metric("Total Settled", total)
                     else:
                         c1, c2 = st.columns(2)
