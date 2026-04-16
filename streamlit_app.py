@@ -86,7 +86,7 @@ st.markdown(f"""
     </div>
   </div>
   <div style="text-align:right">
-    <div class="mph-badge">V4.33</div>
+    <div class="mph-badge">V4.34</div>
     <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y')}</div>
   </div>
 </div>
@@ -304,44 +304,44 @@ PITCHER_ERA_FALLBACK = {
     "Tarik Skubal": 0.69, "Chase Burns": 0.82, "Cristopher Sanchez": 1.65,
     "Rhett Lowder": 1.64, "Cam Schlittler": 1.62, "Trevor Rogers": 1.89,
     "Bryan Woo": 1.50, "Garrett Crochet": 2.59, "Yoshinobu Yamamoto": 2.49,
-    "Logan Webb": 3.12, "Corbin Burnes": 3.22, "Max Fried": 3.25,
-    "Zack Wheeler": 3.18, "Framber Valdez": 3.66, "Freddy Peralta": 3.40,
+    "Bryce Elder": 2.50, "Cade Cavalli": 2.51, "Spencer Schwellenbach": 3.00,
+    "Cade Horton": 2.67, "Nick Pivetta": 2.87, "Ryan Weathers": 2.81,
+    "Spencer Springs": 3.20, "Javier Assad": 3.20, "Logan Webb": 3.12,
+    "Will Warren": 3.07, "Corbin Burnes": 3.22, "Max Fried": 3.25,
+    "Zack Wheeler": 3.18, "Hunter Brown": 3.18, "Framber Valdez": 3.66,
+    "Freddy Peralta": 3.40, "Logan Gilbert": 3.40, "Andrew Abbott": 3.42,
     "Dylan Cease": 3.38, "Luis Castillo": 3.50, "Kevin Gausman": 3.45,
-    "Hunter Brown": 3.18, "George Kirby": 3.60, "Michael King": 3.75,
-    "MacKenzie Gore": 3.90, "Ranger Suarez": 3.80, "Sandy Alcantara": 3.50,
-    "Roki Sasaki": 3.70, "Joe Ryan": 3.85, "Bailey Ober": 3.90,
-    "Logan Gilbert": 3.40, "Nick Pivetta": 2.87, "Paul Skenes": 3.50,
-    "Cole Ragans": 3.50, "Tanner Bibee": 4.24, "Zac Gallen": 3.85,
-    "Gavin Williams": 3.92, "Shane Bieber": 3.60, "Luis Severino": 4.88,
-    "Andrew Abbott": 3.42, "Reese Olson": 4.15, "Jared Jones": 4.20,
-    "Nestor Cortes": 4.20, "Edward Cabrera": 4.20, "Parker Messick": 4.20,
-    "Emerson Hancock": 4.50, "Kyle Harrison": 4.30, "Nick Martinez": 4.40,
-    "Eric Lauer": 4.35, "Chris Paddack": 4.55, "Walker Buehler": 4.80,
-    "Braxton Garrett": 4.30, "Matthew Liberatore": 4.40, "Robbie Ray": 4.80,
-    "Jake Irvin": 4.60, "Carlos Rodon": 4.50, "Kyle Freeland": 4.65,
-    "Patrick Corbin": 5.20, "Konnor Griffin": 3.90, "Simeon Woods Richardson": 4.40,
-    "Jared Bubic": 4.50, "Jesus Luzardo": 4.10, "Jose Suarez": 4.70,
-    "Aaron Civale": 4.50, "Bryce Miller": 4.20, "Tylor Megill": 4.30,
-    "Jose Quintana": 4.50, "Charlie Morton": 4.40, "Dane Dunning": 4.60,
-    "Graham Ashcraft": 4.55, "Hayden Wesneski": 4.40, "Yu Darvish": 3.80,
-    "Mitch Keller": 3.91, "Jameson Taillon": 3.68, "Shane McClanahan": 3.86,
-    "Sonny Gray": 3.80, "Spencer Schwellenbach": 3.00, "Cade Horton": 2.67,
-    "Yusei Kikuchi": 6.76, "Ryne Nelson": 4.20, "Javier Assad": 3.20,
-    "Mike Burrows": 4.20, "Janson Junk": 4.80, "Casey Mize": 4.30,
-    "Keider Montero": 4.50, "Jack Kochanowicz": 4.40, "Brandon Williamson": 4.20,
-    "Jacob Lopez": 4.60, "Erick Fedde": 4.40, "Michael Wacha": 4.10,
-    "Foster Griffin": 4.70, "Kyle Leahy": 4.50, "Chris Bassitt": 4.00,
-    "Shane Baz": 4.20, "Slade Cecconi": 4.40, "Davis Martin": 4.60,
-    "Kris Bubic": 4.20, "Chad Patrick": 4.50, "Connelly Early": 4.80,
-    "Dustin May": 4.30, "Ryan Feltner": 4.70, "German Marquez": 5.00,
-    "Jack Leiter": 3.80, "Emmet Sheehan": 4.20, "Lance McCullers Jr.": 3.90,
-    "Brandon Pfaadt": 4.20, "Taijuan Walker": 4.50, "Martin Perez": 4.40,
-    "Paul Blackburn": 4.30, "Landen Roupp": 3.80, "Steven Matz": 4.50,
-    "J.T. Ginn": 4.20, "Clay Holmes": 3.80, "Kodai Senga": 3.50,
-    "Braxton Ashcraft": 4.30, "Miles Mikolas": 6.50, "Aaron Nola": 4.20,
-    "Merrill Kelly": 4.10, "Patrick Detmers": 4.60, "Ryan Weathers": 2.81,
-    "Spencer Springs": 3.20, "Bryce Elder": 2.50, "Will Warren": 3.07,
-    "Cade Cavalli": 2.51, "Jake Abel": 6.08, "Colin Rea": 3.60,
+    "Paul Skenes": 3.50, "Kodai Senga": 3.50, "Cole Ragans": 3.50,
+    "Sandy Alcantara": 3.50, "George Kirby": 3.60, "Shane Bieber": 3.60,
+    "Colin Rea": 3.60, "Roki Sasaki": 3.70, "Mitch Keller": 3.91,
+    "Jameson Taillon": 3.68, "Michael King": 3.75, "Joe Ryan": 3.85,
+    "Zac Gallen": 3.85, "Shane McClanahan": 3.86, "Landen Roupp": 3.80,
+    "Clay Holmes": 3.80, "Yu Darvish": 3.80, "Jack Leiter": 3.80,
+    "Sonny Gray": 3.80, "Ranger Suarez": 3.80, "MacKenzie Gore": 3.90,
+    "Bailey Ober": 3.90, "Konnor Griffin": 3.90, "Lance McCullers Jr.": 3.90,
+    "Chris Bassitt": 4.00, "Jesus Luzardo": 4.10, "Michael Wacha": 4.10,
+    "Merrill Kelly": 4.10, "Tanner Bibee": 4.24, "Gavin Williams": 3.92,
+    "Reese Olson": 4.15, "Jared Jones": 4.20, "Nestor Cortes": 4.20,
+    "Edward Cabrera": 4.20, "Parker Messick": 4.20, "Ryne Nelson": 4.20,
+    "Bryce Miller": 4.20, "Aaron Nola": 4.20, "J.T. Ginn": 4.20,
+    "Brandon Pfaadt": 4.20, "Emmet Sheehan": 4.20, "Mike Burrows": 4.20,
+    "Brandon Williamson": 4.20, "Kris Bubic": 4.20, "Shane Baz": 4.20,
+    "Jacob Lopez": 4.20, "Tylor Megill": 4.30, "Braxton Garrett": 4.30,
+    "Paul Blackburn": 4.30, "Dustin May": 4.30, "Braxton Ashcraft": 4.30,
+    "Kyle Harrison": 4.30, "Casey Mize": 4.30, "Nick Martinez": 4.40,
+    "Matthew Liberatore": 4.40, "Hayden Wesneski": 4.40, "Erick Fedde": 4.40,
+    "Jack Kochanowicz": 4.40, "Simeon Woods Richardson": 4.40, "Slade Cecconi": 4.40,
+    "Martin Perez": 4.40, "Charlie Morton": 4.40, "Eric Lauer": 4.35,
+    "Emerson Hancock": 4.50, "Chris Paddack": 4.55, "Jose Quintana": 4.50,
+    "Aaron Civale": 4.50, "Jared Bubic": 4.50, "Carlos Rodon": 4.50,
+    "Taijuan Walker": 4.50, "Steven Matz": 4.50, "Chad Patrick": 4.50,
+    "Kyle Leahy": 4.50, "Keider Montero": 4.50, "Graham Ashcraft": 4.55,
+    "Patrick Detmers": 4.60, "Jake Irvin": 4.60, "Dane Dunning": 4.60,
+    "Davis Martin": 4.60, "Kyle Freeland": 4.65, "Ryan Feltner": 4.70,
+    "Foster Griffin": 4.70, "Jose Suarez": 4.70, "Walker Buehler": 4.80,
+    "Robbie Ray": 4.80, "Connelly Early": 4.80, "Janson Junk": 4.80,
+    "Luis Severino": 4.88, "Patrick Corbin": 5.20, "German Marquez": 5.00,
+    "Miles Mikolas": 6.50, "Yusei Kikuchi": 6.76, "Jake Abel": 6.08,
 }
 
 PITCHER_HAND = {
@@ -604,12 +604,13 @@ with st.sidebar:
     st.markdown(f"**Live Bullpen ERA:** {'✅' if len(_live_bullpen) >= 20 else '⚠️'} {len(_live_bullpen)} teams")
     st.caption("Live stats kick in after ≥5 games played.")
     st.markdown("---")
-    st.markdown("**V4.33 Improvements:**")
+    st.markdown("**V4.34 Improvements:**")
     st.caption("✅ 50/50 ERA blend (early season)")
     st.caption("✅ Team vs LHP/RHP splits")
     st.caption("✅ Pitcher rest days")
     st.caption("✅ Umpire factor wired in")
     st.caption("✅ Home/away team splits")
+    st.caption("✅ Updated 2026 ERA dict")
 
 def get_team_rpg(team_name):
     for key in _live_rpg:
@@ -842,20 +843,17 @@ def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
     if _is_default:
         st.warning(f"⚠️ **Default line ({line}) — Odds API unavailable.** No signals until real Vegas line loads.")
         return 0.0, 0.0
-
     prob_detail = model_to_prob_detail(model_total, line)
     auto_prob = int(prob_detail["final"])
     implied = price_cents / 100
     over_edge = (auto_prob / 100) - implied
     under_edge = (1 - auto_prob / 100) - (1 - implied)
-
     st.caption(
         f"🎲 Model: {prob_detail['final']}% OVER | "
         f"Poisson: {prob_detail['poisson']}% | "
         f"MC: {prob_detail['monte_carlo']}% | "
         f"Implied: {round(implied * 100, 1)}%"
     )
-
     col_o, col_u = st.columns(2)
     with col_o:
         e = round(over_edge * 100, 1)
@@ -1092,7 +1090,6 @@ with tab1:
                     _fg_lean = "OVER" if _fgd > 0.3 else "UNDER" if _fgd < -0.3 else "EVEN"
                     _f5_edge = (_f5_prob - _k5_price/100) if _f5_lean == "OVER" else ((1-_f5_prob) - (1-_k5_price/100))
                     _fg_edge = (_fg_prob - _kf_price/100) if _fg_lean == "OVER" else ((1-_fg_prob) - (1-_kf_price/100))
-
                     _f5_default_blocked = (_f5_line == DEFAULT_F5_LINE and not odds_lines)
                     _fg_default_blocked = (_fg_line == DEFAULT_FG_LINE and not odds_lines)
 
@@ -1164,18 +1161,13 @@ with tab1:
                 st.markdown("<div class='section-header'>📋 Today's Slate</div>", unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
                 with c1:
-                    if kalshi_lines:
-                        st.success(kalshi_status)
-                    else:
-                        st.warning(kalshi_status)
+                    if kalshi_lines: st.success(kalshi_status)
+                    else: st.warning(kalshi_status)
                 with c2:
-                    if odds_lines:
-                        st.success(odds_status)
-                    else:
-                        st.warning(odds_status)
+                    if odds_lines: st.success(odds_status)
+                    else: st.warning(odds_status)
                 if not odds_lines:
                     st.error("⛔ Odds API unavailable — default lines in use. No bets will fire.")
-
                 view_type = st.radio("Table view", ["📱 Mobile", "🖥️ Desktop"],
                                      horizontal=True, label_visibility="collapsed")
                 df_all = pd.DataFrame(rows)
@@ -1210,12 +1202,10 @@ with tab1:
                         home_rest_str = f" | Rest: {f5['home_days_rest']}d ({f5['home_rest_adj']:+.2f})" if f5['home_days_rest'] else ""
                         away_plat_str = f" | Platoon: {f5['away_platoon']:+.2f}" if f5['away_platoon'] != 0.0 else ""
                         home_plat_str = f" | Platoon: {f5['home_platoon']:+.2f}" if f5['home_platoon'] != 0.0 else ""
-
                         st.markdown(
                             f"**Away SP:** {ap} ({f5['away_hand']}HP) | ERA: {f5['away_era']} {away_src}{away_plat_str}{away_rest_str}  \n"
                             f"**Home SP:** {hp} ({f5['home_hand']}HP) | ERA: {f5['home_era']} {home_src}{home_plat_str}{home_rest_str}"
                         )
-
                         ump_name = f5.get("ump_name", "")
                         ump_factor = f5.get("ump_factor", 1.0)
                         if ump_name:
@@ -1243,7 +1233,6 @@ with tab1:
                             st.info(wx_str)
 
                         st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
-
                         st.markdown('<div class="section-header">⚾ First 5 Innings</div>', unsafe_allow_html=True)
                         cF1, cF2 = st.columns(2)
                         with cF1:
@@ -1261,14 +1250,12 @@ with tab1:
                             st.success(f"✅ Kalshi F5: {_f5_line} | Over: {_f5_price}¢")
                         else:
                             st.caption("F5 Kalshi line not loaded — using default 4.5")
-
                         f5_line_in = st.number_input("F5 Line", 0.0, 15.0, _f5_line, 0.5, key=f"f5l_{game_id}")
                         f5_price_in = st.number_input("F5 Over Price (¢)", 1, 99, _f5_price, 1, key=f"f5p_{game_id}")
                         signal_boxes(f5["total"], f5_line_in, f5_price_in, game_id,
                                      "F5", away, home, ap, hp, "f5", today)
 
                         st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
-
                         st.markdown('<div class="section-header">🏟️ Full Game</div>', unsafe_allow_html=True)
                         cG1, cG2 = st.columns(2)
                         with cG1:
@@ -1289,7 +1276,6 @@ with tab1:
                             st.success(f"✅ Kalshi FG: {_fg_line} | Over: {_fg_price}¢")
                         else:
                             st.caption("Full game Kalshi line not loaded — using default 8.5")
-
                         fg_line_in = st.number_input("FG Line", 0.0, 20.0, _fg_line, 0.5, key=f"fgl_{game_id}")
                         fg_price_in = st.number_input("FG Over Price (¢)", 1, 99, _fg_price, 1, key=f"fgp_{game_id}")
                         signal_boxes(fg["total"], fg_line_in, fg_price_in, game_id,
