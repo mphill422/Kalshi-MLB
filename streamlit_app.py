@@ -86,7 +86,7 @@ st.markdown(f"""
     </div>
   </div>
   <div style="text-align:right">
-    <div class="mph-badge">V4.34</div>
+    <div class="mph-badge">V4.35</div>
     <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y')}</div>
   </div>
 </div>
@@ -139,6 +139,12 @@ PARK_FACTORS = {
     "Los Angeles Angels": 0.97, "New York Mets": 0.97, "Miami Marlins": 0.96,
     "Oakland Athletics": 0.96, "Athletics": 0.96, "Seattle Mariners": 0.95,
     "Los Angeles Dodgers": 0.92, "San Francisco Giants": 0.94, "San Diego Padres": 0.92,
+}
+
+DOME_TEAMS = {
+    "Arizona Diamondbacks", "Chicago White Sox", "Houston Astros", "Miami Marlins",
+    "Milwaukee Brewers", "Seattle Mariners", "Tampa Bay Rays", "Texas Rangers",
+    "Toronto Blue Jays",
 }
 
 HOME_ADVANTAGE_RUNS = 0.20
@@ -604,13 +610,13 @@ with st.sidebar:
     st.markdown(f"**Live Bullpen ERA:** {'✅' if len(_live_bullpen) >= 20 else '⚠️'} {len(_live_bullpen)} teams")
     st.caption("Live stats kick in after ≥5 games played.")
     st.markdown("---")
-    st.markdown("**V4.34 Improvements:**")
-    st.caption("✅ 50/50 ERA blend (early season)")
-    st.caption("✅ Team vs LHP/RHP splits")
-    st.caption("✅ Pitcher rest days")
-    st.caption("✅ Umpire factor wired in")
-    st.caption("✅ Home/away team splits")
-    st.caption("✅ Updated 2026 ERA dict")
+    st.markdown("**V4.35 Improvements:**")
+    st.caption("✅ Edge% column in table")
+    st.caption("✅ Rest flag in table")
+    st.caption("✅ Dome flag in Park column")
+    st.caption("✅ SP ERAs shown in FG section")
+    st.caption("✅ R-Sox / W-Sox fix")
+    st.caption("✅ Centered + tighter columns")
 
 def get_team_rpg(team_name):
     for key in _live_rpg:
@@ -635,6 +641,12 @@ def get_park_factor(home_team):
         if key.lower() in home_team.lower() or home_team.lower() in key.lower():
             return PARK_FACTORS[key]
     return 1.0
+
+def is_dome(home_team):
+    for d in DOME_TEAMS:
+        if d.lower() in home_team.lower() or home_team.lower() in d.lower():
+            return True
+    return False
 
 def blend_era(pitcher_name):
     season_era, src = fetch_live_sp_era(pitcher_name)
@@ -797,6 +809,8 @@ def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, g
         "away_bp_adj": away_bp_adj, "home_bp_adj": home_bp_adj,
         "away_rest_adj": away_rest_adj, "away_days_rest": away_days_rest,
         "home_rest_adj": home_rest_adj, "home_days_rest": home_days_rest,
+        "away_hand": away_hand, "home_hand": home_hand,
+        "away_platoon": away_platoon, "home_platoon": home_platoon,
         "ump_name": ump_name, "ump_factor": ump_factor,
         "wind_adj": w_adj, "temp_adj": t_adj, "wind_label": w_label,
     }
@@ -835,6 +849,25 @@ def model_to_prob_detail(model_total, line):
 def calc_kelly(edge):
     bet_pct = min((edge / 1.0) * KELLY_FRACTION, MAX_BET_PCT)
     return round(bet_pct * 100, 1), round(BANKROLL * bet_pct, 2)
+
+def abbrev_team(name):
+    """Smart abbreviation — handles Sox ambiguity."""
+    parts = name.split()
+    last = parts[-1] if parts else name
+    if "Red Sox" in name: return "R-Sox"
+    if "White Sox" in name: return "W-Sox"
+    return last
+
+def abbrev_pitcher(name):
+    if not name or name == "TBD": return "TBD"
+    p = name.split()
+    return f"{p[0][0]}.{p[-1]}" if len(p) >= 2 else name
+
+def rest_flag(days_rest):
+    if days_rest is None: return ""
+    if days_rest <= 3: return "⚠️S"
+    if days_rest >= 7: return "💤L"
+    return ""
 
 def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
                  away_pitcher, home_pitcher, market_type, today):
@@ -1070,6 +1103,7 @@ with tab1:
                     _game_id = str(g['game_id'])
                     _game_date = today
                     _pf = get_park_factor(_home)
+                    _dome = is_dome(_home)
                     _game_utc_hour = datetime.strptime(g['game_datetime'], '%Y-%m-%dT%H:%M:%SZ').hour
                     _wx = fetch_stadium_weather(_home, game_hour_utc=_game_utc_hour)
                     _f5 = calc_f5(_away, _home, _ap, _hp, _pf, _wx, _game_id, _game_date)
@@ -1079,80 +1113,70 @@ with tab1:
                     _fg_line = _kf["line"] if _kf else DEFAULT_FG_LINE
                     _f5_line = _k5["line"] if _k5 else DEFAULT_F5_LINE
                     _odds = match_odds(_away, _home, odds_lines)
-                    _pf_str = f"{_pf:.2f} {'🏔️' if _pf>=1.04 else '⬆️' if _pf>1.0 else '➡️' if _pf==1.0 else '⬇️'}"
-                    _f5d = round(_f5["total"] - _f5_line, 1)
-                    _fgd = round(_fg["total"] - _fg_line, 1)
                     _k5_price = _k5["over_price_cents"] if _k5 else 50
                     _kf_price = _kf["over_price_cents"] if _kf else 50
                     _f5_prob = model_to_prob(_f5["total"], _f5_line) / 100
                     _fg_prob = model_to_prob(_fg["total"], _fg_line) / 100
-                    _f5_lean = "OVER" if _f5d > 0.3 else "UNDER" if _f5d < -0.3 else "EVEN"
-                    _fg_lean = "OVER" if _fgd > 0.3 else "UNDER" if _fgd < -0.3 else "EVEN"
+                    _f5_lean = "OVER" if (_f5["total"] - _f5_line) > 0.3 else "UNDER" if (_f5["total"] - _f5_line) < -0.3 else "EVEN"
+                    _fg_lean = "OVER" if (_fg["total"] - _fg_line) > 0.3 else "UNDER" if (_fg["total"] - _fg_line) < -0.3 else "EVEN"
                     _f5_edge = (_f5_prob - _k5_price/100) if _f5_lean == "OVER" else ((1-_f5_prob) - (1-_k5_price/100))
                     _fg_edge = (_fg_prob - _kf_price/100) if _fg_lean == "OVER" else ((1-_fg_prob) - (1-_kf_price/100))
                     _f5_default_blocked = (_f5_line == DEFAULT_F5_LINE and not odds_lines)
                     _fg_default_blocked = (_fg_line == DEFAULT_FG_LINE and not odds_lines)
 
-                    if _f5_default_blocked:
-                        _f5_signal = "⛔ DEFAULT LINE"
-                        _f5_dir = "⚪"
-                    elif _f5_lean == "EVEN" or abs(_f5_edge) < EDGE_THRESHOLD:
-                        _f5_signal = "⚪ NO EDGE"
-                        _f5_dir = "⚪"
-                    elif abs(_f5_edge) * 100 >= 12:
-                        _f5_signal = "🔥 HIGH"
-                        _f5_dir = "🟢 OVER" if _f5_lean == "OVER" else "🔴 UNDER"
-                    elif abs(_f5_edge) * 100 >= 8:
-                        _f5_signal = "💪 STRONG"
-                        _f5_dir = "🟢 OVER" if _f5_lean == "OVER" else "🔴 UNDER"
-                    else:
-                        _f5_signal = "👍 LEAN"
-                        _f5_dir = "🟢 OVER" if _f5_lean == "OVER" else "🔴 UNDER"
+                    def _signal(lean, edge, default_blocked):
+                        if default_blocked: return "⛔ DEFAULT", "⚪"
+                        if lean == "EVEN" or abs(edge) < EDGE_THRESHOLD: return "⚪ NO EDGE", "⚪"
+                        direction = "🟢 OVER" if lean == "OVER" else "🔴 UNDER"
+                        if abs(edge) * 100 >= 12: return "🔥 HIGH", direction
+                        if abs(edge) * 100 >= 8: return "💪 STRONG", direction
+                        return "👍 LEAN", direction
 
-                    if _fg_default_blocked:
-                        _fg_signal = "⛔ DEFAULT LINE"
-                        _fg_dir = "⚪"
-                    elif _fg_lean == "EVEN" or abs(_fg_edge) < EDGE_THRESHOLD:
-                        _fg_signal = "⚪ NO EDGE"
-                        _fg_dir = "⚪"
-                    elif abs(_fg_edge) * 100 >= 12:
-                        _fg_signal = "🔥 HIGH"
-                        _fg_dir = "🟢 OVER" if _fg_lean == "OVER" else "🔴 UNDER"
-                    elif abs(_fg_edge) * 100 >= 8:
-                        _fg_signal = "💪 STRONG"
-                        _fg_dir = "🟢 OVER" if _fg_lean == "OVER" else "🔴 UNDER"
-                    else:
-                        _fg_signal = "👍 LEAN"
-                        _fg_dir = "🟢 OVER" if _fg_lean == "OVER" else "🔴 UNDER"
+                    _f5_sig, _f5_dir = _signal(_f5_lean, _f5_edge, _f5_default_blocked)
+                    _fg_sig, _fg_dir = _signal(_fg_lean, _fg_edge, _fg_default_blocked)
 
-                    def abbrev_team(n):
-                        parts = n.split()
-                        return parts[-1] if parts else n
+                    # Park — emoji only + dome flag
+                    _pf_emoji = "🏟️" if _dome else ("🏔️" if _pf >= 1.04 else "⬆️" if _pf > 1.0 else "➡️" if _pf == 1.0 else "⬇️")
 
-                    def abbrev_pitcher(n):
-                        if not n or n == "TBD": return "TBD"
-                        p = n.split()
-                        return f"{p[0][0]}. {p[-1]}" if len(p) >= 2 else n
+                    # Rest flags
+                    _away_rest = rest_flag(_f5.get("away_days_rest"))
+                    _home_rest = rest_flag(_f5.get("home_days_rest"))
+                    _rest_str = f"{_away_rest}{_home_rest}" if (_away_rest or _home_rest) else "✅"
 
-                    _ump = _f5.get("ump_name", "")
-                    _ump_factor = _f5.get("ump_factor", 1.0)
-                    _ump_str = f"{_ump} ({_ump_factor:.2f})" if _ump else "TBA"
+                    # Edge %
+                    _f5_edge_pct = f"{'+' if _f5_edge > 0 else ''}{round(_f5_edge*100,1)}%" if not _f5_default_blocked else "—"
+                    _fg_edge_pct = f"{'+' if _fg_edge > 0 else ''}{round(_fg_edge*100,1)}%" if not _fg_default_blocked else "—"
+
+                    _away_abbr = abbrev_team(_away)
+                    _home_abbr = abbrev_team(_home)
+                    _ap_abbr = abbrev_pitcher(_ap)
+                    _hp_abbr = abbrev_pitcher(_hp)
+                    _vegas_str = f"{_odds['total']}" if _odds else "—"
 
                     rows.append({
-                        "Time": _et, "Matchup": f"{abbrev_team(_away)}@{abbrev_team(_home)}",
-                        "Mkt": "F5", "Model": _f5["total"],
+                        "Time": _et,
+                        "Matchup": f"{_away_abbr}@{_home_abbr}",
+                        "Away SP": _ap_abbr,
+                        "Home SP": _hp_abbr,
+                        "Park": _pf_emoji,
+                        "Rest": _rest_str,
+                        "Ump": _f5.get("ump_name", "TBA").split()[-1] if _f5.get("ump_name") else "TBA",
+                        "Mkt": "F5",
+                        "Mdl": _f5["total"],
                         "Line": f"{_f5_line}{'✅' if _k5 else '~'}",
-                        "Signal": f"{_f5_dir} {_f5_signal}", "Vegas": "—",
-                        "Away SP": _ap if _ap != "TBD" else "❓",
-                        "Home SP": _hp if _hp != "TBD" else "❓",
-                        "Park": _pf_str, "Ump": _ump_str,
+                        "Vegas": "—",
+                        "Edge%": _f5_edge_pct,
+                        "Signal": f"{_f5_dir} {_f5_sig}",
                     })
                     rows.append({
-                        "Time": "", "Matchup": "", "Mkt": "FG", "Model": _fg["total"],
+                        "Time": "", "Matchup": "", "Away SP": "", "Home SP": "",
+                        "Park": "", "Rest": "", "Ump": "",
+                        "Mkt": "FG",
+                        "Mdl": _fg["total"],
                         "Line": f"{_fg_line}{'✅' if _kf else '~'}",
-                        "Signal": f"{_fg_dir} {_fg_signal}",
-                        "Vegas": f"{_odds['total']}" if _odds else "—",
-                        "Away SP": "", "Home SP": "", "Park": "", "Ump": "",
+                        "Vegas": _vegas_str,
+                        "Edge%": _fg_edge_pct,
+                        "Signal": f"{_fg_dir} {_fg_sig}",
                     })
                 except Exception:
                     continue
@@ -1168,16 +1192,47 @@ with tab1:
                     else: st.warning(odds_status)
                 if not odds_lines:
                     st.error("⛔ Odds API unavailable — default lines in use. No bets will fire.")
+
                 view_type = st.radio("Table view", ["📱 Mobile", "🖥️ Desktop"],
                                      horizontal=True, label_visibility="collapsed")
                 df_all = pd.DataFrame(rows)
+
+                # Center all columns
+                styled = df_all.style.set_properties(**{'text-align': 'center'})
+
                 if view_type == "📱 Mobile":
-                    st.dataframe(df_all[["Time","Matchup","Mkt","Model","Line","Signal"]],
-                                 use_container_width=True, hide_index=True)
+                    mobile_cols = ["Time", "Matchup", "Mkt", "Mdl", "Line", "Edge%", "Signal"]
+                    st.dataframe(df_all[mobile_cols].style.set_properties(**{'text-align': 'center'}),
+                                 use_container_width=True, hide_index=True,
+                                 column_config={
+                                     "Time": st.column_config.TextColumn(width="small"),
+                                     "Matchup": st.column_config.TextColumn(width="medium"),
+                                     "Mkt": st.column_config.TextColumn(width="small"),
+                                     "Mdl": st.column_config.NumberColumn(width="small", format="%.1f"),
+                                     "Line": st.column_config.TextColumn(width="small"),
+                                     "Edge%": st.column_config.TextColumn(width="small"),
+                                     "Signal": st.column_config.TextColumn(width="large"),
+                                 })
                 else:
-                    st.dataframe(df_all[["Time","Matchup","Away SP","Home SP","Park","Ump",
-                                         "Mkt","Model","Line","Vegas","Signal"]],
-                                 use_container_width=True, hide_index=True)
+                    desktop_cols = ["Time", "Matchup", "Away SP", "Home SP", "Park", "Rest", "Ump",
+                                    "Mkt", "Mdl", "Line", "Vegas", "Edge%", "Signal"]
+                    st.dataframe(df_all[desktop_cols].style.set_properties(**{'text-align': 'center'}),
+                                 use_container_width=True, hide_index=True,
+                                 column_config={
+                                     "Time": st.column_config.TextColumn(width="small"),
+                                     "Matchup": st.column_config.TextColumn(width="medium"),
+                                     "Away SP": st.column_config.TextColumn(width="small"),
+                                     "Home SP": st.column_config.TextColumn(width="small"),
+                                     "Park": st.column_config.TextColumn(width="small"),
+                                     "Rest": st.column_config.TextColumn(width="small"),
+                                     "Ump": st.column_config.TextColumn(width="small"),
+                                     "Mkt": st.column_config.TextColumn(width="small"),
+                                     "Mdl": st.column_config.NumberColumn(width="small", format="%.1f"),
+                                     "Line": st.column_config.TextColumn(width="small"),
+                                     "Vegas": st.column_config.TextColumn(width="small"),
+                                     "Edge%": st.column_config.TextColumn(width="small"),
+                                     "Signal": st.column_config.TextColumn(width="large"),
+                                 })
                 st.markdown("---")
 
             for game in schedule:
@@ -1233,6 +1288,8 @@ with tab1:
                             st.info(wx_str)
 
                         st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+
+                        # ── F5 Section ────────────────────────────────────────
                         st.markdown('<div class="section-header">⚾ First 5 Innings</div>', unsafe_allow_html=True)
                         cF1, cF2 = st.columns(2)
                         with cF1:
@@ -1256,15 +1313,25 @@ with tab1:
                                      "F5", away, home, ap, hp, "f5", today)
 
                         st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+
+                        # ── FG Section ────────────────────────────────────────
                         st.markdown('<div class="section-header">🏟️ Full Game</div>', unsafe_allow_html=True)
                         cG1, cG2 = st.columns(2)
                         with cG1:
                             st.metric("FG Model", fg["total"])
                         with cG2:
+                            st.metric(f"Away ERA ({ap})", fg["away_era"],
+                                      delta=f"Recent: {fg['away_recent']}" if fg["away_recent"] else "Season only")
+                        st.metric(f"Home ERA ({hp})", fg["home_era"],
+                                  delta=f"Recent: {fg['home_recent']}" if fg["home_recent"] else "Season only")
+
+                        cB1, cB2 = st.columns(2)
+                        with cB1:
                             st.metric("Away Bullpen", fg["away_bp_era"],
                                       delta=f"Adj: {fg['away_bp_adj']:+.2f}")
-                        st.metric("Home Bullpen", fg["home_bp_era"],
-                                  delta=f"Adj: {fg['home_bp_adj']:+.2f}")
+                        with cB2:
+                            st.metric("Home Bullpen", fg["home_bp_era"],
+                                      delta=f"Adj: {fg['home_bp_adj']:+.2f}")
 
                         _kf = match_kalshi(away, home, kalshi_lines, "full")
                         _fg_line = float(_kf["line"]) if _kf else DEFAULT_FG_LINE
