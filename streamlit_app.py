@@ -5,6 +5,7 @@ import requests
 from datetime import datetime, timedelta
 from supabase import create_client
 from datetime import timezone
+import math
 
 ET_OFFSET = timezone(timedelta(hours=-4))
 
@@ -86,7 +87,7 @@ st.markdown(f"""
     </div>
   </div>
   <div style="text-align:right">
-    <div class="mph-badge">V4.35</div>
+    <div class="mph-badge">V4.36</div>
     <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y')}</div>
   </div>
 </div>
@@ -150,142 +151,36 @@ DOME_TEAMS = {
 HOME_ADVANTAGE_RUNS = 0.20
 HOME_ADVANTAGE_F5 = 0.10
 
-TEAM_HOME_AWAY_SPLITS = {
-    "Los Angeles Dodgers":   (5.4, 4.8), "Atlanta Braves":        (5.2, 4.8),
-    "New York Yankees":      (5.0, 4.4), "Philadelphia Phillies": (5.1, 4.7),
-    "Houston Astros":        (4.9, 4.3), "New York Mets":         (4.9, 4.5),
-    "Boston Red Sox":        (4.9, 4.5), "Toronto Blue Jays":     (5.0, 4.6),
-    "Minnesota Twins":       (4.7, 4.3), "Detroit Tigers":        (4.6, 4.2),
-    "Cleveland Guardians":   (4.5, 4.1), "Kansas City Royals":    (4.5, 4.1),
-    "Seattle Mariners":      (4.4, 4.0), "San Diego Padres":      (4.6, 4.2),
-    "Arizona Diamondbacks":  (4.9, 4.5), "Colorado Rockies":      (5.0, 4.0),
-    "Cincinnati Reds":       (4.6, 4.2), "Chicago Cubs":          (4.6, 4.2),
-    "Milwaukee Brewers":     (4.5, 4.1), "St. Louis Cardinals":   (4.4, 4.0),
-    "Pittsburgh Pirates":    (4.2, 3.8), "Baltimore Orioles":     (4.7, 4.3),
-    "Tampa Bay Rays":        (4.3, 3.9), "Texas Rangers":         (4.6, 4.2),
-    "Los Angeles Angels":    (4.1, 3.7), "Oakland Athletics":     (3.9, 3.5),
-    "Athletics":             (3.9, 3.5), "Chicago White Sox":     (3.8, 3.4),
-    "Miami Marlins":         (4.0, 3.6), "Washington Nationals":  (4.3, 3.9),
-    "San Francisco Giants":  (4.3, 3.9),
+# Stadium CF bearing AND LF/RF bearings for wind direction labels
+# cf = center field bearing (degrees from home toward CF)
+# lf = left field bearing, rf = right field bearing
+STADIUM_ORIENTATION = {
+    "Atlanta Braves":        {"cf": 22,  "lf": 337, "rf": 67},
+    "Baltimore Orioles":     {"cf": 90,  "lf": 45,  "rf": 135},
+    "Boston Red Sox":        {"cf": 95,  "lf": 50,  "rf": 140},
+    "Chicago Cubs":          {"cf": 180, "lf": 135, "rf": 225},
+    "Cincinnati Reds":       {"cf": 355, "lf": 310, "rf": 40},
+    "Cleveland Guardians":   {"cf": 225, "lf": 180, "rf": 270},
+    "Colorado Rockies":      {"cf": 292, "lf": 247, "rf": 337},
+    "Detroit Tigers":        {"cf": 352, "lf": 307, "rf": 37},
+    "Kansas City Royals":    {"cf": 30,  "lf": 345, "rf": 75},
+    "Los Angeles Angels":    {"cf": 225, "lf": 180, "rf": 270},
+    "Los Angeles Dodgers":   {"cf": 315, "lf": 270, "rf": 0},
+    "Minnesota Twins":       {"cf": 105, "lf": 60,  "rf": 150},
+    "New York Mets":         {"cf": 355, "lf": 310, "rf": 40},
+    "New York Yankees":      {"cf": 225, "lf": 180, "rf": 270},
+    "Oakland Athletics":     {"cf": 225, "lf": 180, "rf": 270},
+    "Athletics":             {"cf": 225, "lf": 180, "rf": 270},
+    "Philadelphia Phillies": {"cf": 55,  "lf": 10,  "rf": 100},
+    "Pittsburgh Pirates":    {"cf": 125, "lf": 80,  "rf": 170},
+    "San Diego Padres":      {"cf": 315, "lf": 270, "rf": 0},
+    "San Francisco Giants":  {"cf": 115, "lf": 70,  "rf": 160},
+    "St. Louis Cardinals":   {"cf": 105, "lf": 60,  "rf": 150},
+    "Washington Nationals":  {"cf": 45,  "lf": 0,   "rf": 90},
 }
 
-def get_team_home_rpg(team_name):
-    for key in TEAM_HOME_AWAY_SPLITS:
-        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
-            return TEAM_HOME_AWAY_SPLITS[key][0]
-    return get_team_rpg(team_name) + HOME_ADVANTAGE_RUNS
-
-def get_team_away_rpg(team_name):
-    for key in TEAM_HOME_AWAY_SPLITS:
-        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
-            return TEAM_HOME_AWAY_SPLITS[key][1]
-    return get_team_rpg(team_name)
-
-TEAM_HANDEDNESS_SPLITS = {
-    "New York Yankees":      (0.98, 1.08), "Boston Red Sox":        (1.02, 1.05),
-    "Toronto Blue Jays":     (1.01, 1.03), "Baltimore Orioles":     (0.99, 1.02),
-    "Tampa Bay Rays":        (1.00, 0.97), "Cleveland Guardians":   (0.98, 1.04),
-    "Minnesota Twins":       (1.02, 1.01), "Detroit Tigers":        (0.99, 1.00),
-    "Kansas City Royals":    (1.00, 0.98), "Chicago White Sox":     (0.97, 0.95),
-    "Houston Astros":        (1.03, 1.05), "Seattle Mariners":      (1.01, 0.98),
-    "Texas Rangers":         (1.02, 1.01), "Los Angeles Angels":    (0.96, 0.98),
-    "Oakland Athletics":     (0.97, 0.96), "Athletics":             (0.97, 0.96),
-    "New York Mets":         (1.03, 1.04), "Philadelphia Phillies": (1.04, 1.06),
-    "Atlanta Braves":        (1.05, 1.03), "Washington Nationals":  (0.98, 0.97),
-    "Miami Marlins":         (0.95, 0.96), "Chicago Cubs":          (1.02, 1.03),
-    "Milwaukee Brewers":     (1.01, 1.00), "St. Louis Cardinals":   (1.00, 0.99),
-    "Pittsburgh Pirates":    (0.97, 0.98), "Cincinnati Reds":       (1.01, 1.02),
-    "Los Angeles Dodgers":   (1.06, 1.08), "San Diego Padres":      (1.02, 1.01),
-    "Arizona Diamondbacks":  (1.03, 1.04), "San Francisco Giants":  (1.00, 1.01),
-    "Colorado Rockies":      (1.04, 1.02),
-}
-
-def get_handedness_factor(team_name, pitcher_hand):
-    for key in TEAM_HANDEDNESS_SPLITS:
-        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
-            rhp_factor, lhp_factor = TEAM_HANDEDNESS_SPLITS[key]
-            return rhp_factor if pitcher_hand == "R" else lhp_factor
-    return 1.0
-
-REST_ERA_ADJ = {3: +0.40, 4: +0.15, 5: 0.00, 6: +0.10, 7: +0.20, 8: +0.30}
-
-@st.cache_data(ttl=3600)
-def get_rest_adj(pitcher_name, game_date_str=None):
-    if not pitcher_name or pitcher_name == 'TBD':
-        return 0.0, None
-    try:
-        results = statsapi.lookup_player(pitcher_name)
-        if not results: return 0.0, None
-        player_id = results[0]['id']
-        logs = statsapi.player_stat_data(player_id, group='pitching', type='gameLog', sportId=1)
-        if not logs or 'stats' not in logs: return 0.0, None
-        starts = [g for g in logs['stats'] if g.get('gamesStarted', 0) >= 1]
-        if not starts: return 0.0, None
-        last_date_str = starts[-1].get('date', '')
-        if not last_date_str: return 0.0, None
-        last_date = datetime.strptime(last_date_str, '%Y-%m-%d')
-        today = datetime.strptime(game_date_str, '%Y-%m-%d') if game_date_str else datetime.now()
-        days_rest = min((today - last_date).days, 8)
-        return REST_ERA_ADJ.get(days_rest, 0.0), days_rest
-    except Exception:
-        return 0.0, None
-
-UMPIRE_RUN_FACTOR = {
-    "Angel Hernandez": 1.08, "CB Bucknor": 1.06, "Joe West": 1.05,
-    "Dan Iassogna": 1.04, "Adrian Johnson": 1.04, "Laz Diaz": 1.03,
-    "Mark Carlson": 1.02, "Phil Cuzzi": 1.02, "Jim Reynolds": 1.01,
-    "Bill Miller": 1.00, "John Tumpane": 1.00, "Todd Tichenor": 1.00,
-    "Vic Carapazza": 0.99, "Brian Gorman": 0.99, "Mike Everitt": 0.99,
-    "Larry Vanover": 0.98, "Tim Timmons": 0.98, "Chris Guccione": 0.97,
-    "Marvin Hudson": 0.97, "Doug Eddings": 0.96, "James Hoye": 0.96,
-    "Bob Davidson": 0.95, "Mike DiMuro": 0.95, "Jeff Kellogg": 0.95,
-    "Jerry Meals": 0.94, "Tom Hallion": 0.94, "Sam Holbrook": 0.93,
-    "Ted Barrett": 0.93, "Mark Wegner": 0.92, "Lance Barrett": 0.92,
-    "Junior Valentine": 1.05, "Alex MacKay": 1.03, "Nestor Ceja": 1.02,
-    "Ryan Additon": 0.98, "Brennan Miller": 0.97, "Jeremie Rehak": 0.96,
-    "Clint Vondrak": 0.99, "David Rackley": 1.01, "Nate Tomlinson": 1.00,
-    "Stu Scheurwater": 0.98,
-}
-
-def get_umpire_factor(ump_name):
-    if not ump_name: return 1.0
-    for key in UMPIRE_RUN_FACTOR:
-        if key.lower() in ump_name.lower() or ump_name.lower() in key.lower():
-            return UMPIRE_RUN_FACTOR[key]
-    return 1.0
-
-@st.cache_data(ttl=3600)
-def fetch_todays_umpires():
-    import requests as _req
-    result = {}
-    try:
-        resp = _req.get(
-            f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today_et()}"
-            f"&hydrate=officials&gameType=R", timeout=8)
-        if resp.status_code != 200: return result
-        for date_entry in resp.json().get('dates', []):
-            for game in date_entry.get('games', []):
-                gid = str(game.get('gamePk', ''))
-                for official in game.get('officials', []):
-                    if official.get('officialType') == 'Home Plate':
-                        name = official.get('official', {}).get('fullName', '')
-                        if name:
-                            result[gid] = name
-                            break
-    except Exception:
-        pass
-    return result
-
-STADIUM_CF_BEARING = {
-    "Atlanta Braves": 22, "Baltimore Orioles": 90, "Boston Red Sox": 95,
-    "Chicago Cubs": 180, "Cincinnati Reds": 355, "Cleveland Guardians": 225,
-    "Colorado Rockies": 292, "Detroit Tigers": 352, "Kansas City Royals": 30,
-    "Los Angeles Angels": 225, "Los Angeles Dodgers": 315, "Minnesota Twins": 105,
-    "New York Mets": 355, "New York Yankees": 225, "Oakland Athletics": 225,
-    "Athletics": 225, "Philadelphia Phillies": 55, "Pittsburgh Pirates": 125,
-    "San Diego Padres": 315, "San Francisco Giants": 115, "St. Louis Cardinals": 105,
-    "Washington Nationals": 45,
-}
+# Keep backward compat
+STADIUM_CF_BEARING = {k: v["cf"] for k, v in STADIUM_ORIENTATION.items()}
 
 STADIUM_COORDS = {
     "Arizona Diamondbacks": None, "Atlanta Braves": (33.8908, -84.4678),
@@ -421,6 +316,164 @@ def platoon_adj(pitcher_name, opposing_team):
         deviation = (1 - lhh_pct) - (1 - NEUTRAL_LHH)
     return round(-deviation * 2.0, 2)
 
+TEAM_HOME_AWAY_SPLITS = {
+    "Los Angeles Dodgers":   (5.4, 4.8), "Atlanta Braves":        (5.2, 4.8),
+    "New York Yankees":      (5.0, 4.4), "Philadelphia Phillies": (5.1, 4.7),
+    "Houston Astros":        (4.9, 4.3), "New York Mets":         (4.9, 4.5),
+    "Boston Red Sox":        (4.9, 4.5), "Toronto Blue Jays":     (5.0, 4.6),
+    "Minnesota Twins":       (4.7, 4.3), "Detroit Tigers":        (4.6, 4.2),
+    "Cleveland Guardians":   (4.5, 4.1), "Kansas City Royals":    (4.5, 4.1),
+    "Seattle Mariners":      (4.4, 4.0), "San Diego Padres":      (4.6, 4.2),
+    "Arizona Diamondbacks":  (4.9, 4.5), "Colorado Rockies":      (5.0, 4.0),
+    "Cincinnati Reds":       (4.6, 4.2), "Chicago Cubs":          (4.6, 4.2),
+    "Milwaukee Brewers":     (4.5, 4.1), "St. Louis Cardinals":   (4.4, 4.0),
+    "Pittsburgh Pirates":    (4.2, 3.8), "Baltimore Orioles":     (4.7, 4.3),
+    "Tampa Bay Rays":        (4.3, 3.9), "Texas Rangers":         (4.6, 4.2),
+    "Los Angeles Angels":    (4.1, 3.7), "Oakland Athletics":     (3.9, 3.5),
+    "Athletics":             (3.9, 3.5), "Chicago White Sox":     (3.8, 3.4),
+    "Miami Marlins":         (4.0, 3.6), "Washington Nationals":  (4.3, 3.9),
+    "San Francisco Giants":  (4.3, 3.9),
+}
+
+def get_team_home_rpg(team_name):
+    for key in TEAM_HOME_AWAY_SPLITS:
+        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
+            return TEAM_HOME_AWAY_SPLITS[key][0]
+    return get_team_rpg(team_name) + HOME_ADVANTAGE_RUNS
+
+def get_team_away_rpg(team_name):
+    for key in TEAM_HOME_AWAY_SPLITS:
+        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
+            return TEAM_HOME_AWAY_SPLITS[key][1]
+    return get_team_rpg(team_name)
+
+TEAM_HANDEDNESS_SPLITS = {
+    "New York Yankees":      (0.98, 1.08), "Boston Red Sox":        (1.02, 1.05),
+    "Toronto Blue Jays":     (1.01, 1.03), "Baltimore Orioles":     (0.99, 1.02),
+    "Tampa Bay Rays":        (1.00, 0.97), "Cleveland Guardians":   (0.98, 1.04),
+    "Minnesota Twins":       (1.02, 1.01), "Detroit Tigers":        (0.99, 1.00),
+    "Kansas City Royals":    (1.00, 0.98), "Chicago White Sox":     (0.97, 0.95),
+    "Houston Astros":        (1.03, 1.05), "Seattle Mariners":      (1.01, 0.98),
+    "Texas Rangers":         (1.02, 1.01), "Los Angeles Angels":    (0.96, 0.98),
+    "Oakland Athletics":     (0.97, 0.96), "Athletics":             (0.97, 0.96),
+    "New York Mets":         (1.03, 1.04), "Philadelphia Phillies": (1.04, 1.06),
+    "Atlanta Braves":        (1.05, 1.03), "Washington Nationals":  (0.98, 0.97),
+    "Miami Marlins":         (0.95, 0.96), "Chicago Cubs":          (1.02, 1.03),
+    "Milwaukee Brewers":     (1.01, 1.00), "St. Louis Cardinals":   (1.00, 0.99),
+    "Pittsburgh Pirates":    (0.97, 0.98), "Cincinnati Reds":       (1.01, 1.02),
+    "Los Angeles Dodgers":   (1.06, 1.08), "San Diego Padres":      (1.02, 1.01),
+    "Arizona Diamondbacks":  (1.03, 1.04), "San Francisco Giants":  (1.00, 1.01),
+    "Colorado Rockies":      (1.04, 1.02),
+}
+
+def get_handedness_factor(team_name, pitcher_hand):
+    for key in TEAM_HANDEDNESS_SPLITS:
+        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
+            rhp_factor, lhp_factor = TEAM_HANDEDNESS_SPLITS[key]
+            return rhp_factor if pitcher_hand == "R" else lhp_factor
+    return 1.0
+
+REST_ERA_ADJ = {3: +0.40, 4: +0.15, 5: 0.00, 6: +0.10, 7: +0.20, 8: +0.30}
+
+@st.cache_data(ttl=3600)
+def get_rest_adj(pitcher_name, game_date_str=None):
+    if not pitcher_name or pitcher_name == 'TBD':
+        return 0.0, None
+    try:
+        results = statsapi.lookup_player(pitcher_name)
+        if not results: return 0.0, None
+        player_id = results[0]['id']
+        logs = statsapi.player_stat_data(player_id, group='pitching', type='gameLog', sportId=1)
+        if not logs or 'stats' not in logs: return 0.0, None
+        starts = [g for g in logs['stats'] if g.get('gamesStarted', 0) >= 1]
+        if not starts: return 0.0, None
+        last_date_str = starts[-1].get('date', '')
+        if not last_date_str: return 0.0, None
+        last_date = datetime.strptime(last_date_str, '%Y-%m-%d')
+        today = datetime.strptime(game_date_str, '%Y-%m-%d') if game_date_str else datetime.now()
+        days_rest = min((today - last_date).days, 8)
+        return REST_ERA_ADJ.get(days_rest, 0.0), days_rest
+    except Exception:
+        return 0.0, None
+
+# ── Umpire data: run factor + zone tendency ───────────────────────────────────
+# Zone: "Tight" = small zone (more walks/runs), "Loose" = big zone (fewer walks/runs)
+# Source: UmpScorecards 2023-2025
+UMPIRE_DATA = {
+    "Angel Hernandez": {"factor": 1.08, "zone": "Loose"},
+    "CB Bucknor":      {"factor": 1.06, "zone": "Loose"},
+    "Joe West":        {"factor": 1.05, "zone": "Loose"},
+    "Dan Iassogna":    {"factor": 1.04, "zone": "Loose"},
+    "Adrian Johnson":  {"factor": 1.04, "zone": "Loose"},
+    "Laz Diaz":        {"factor": 1.03, "zone": "Loose"},
+    "Junior Valentine":{"factor": 1.05, "zone": "Loose"},
+    "Mark Carlson":    {"factor": 1.02, "zone": "Average"},
+    "Phil Cuzzi":      {"factor": 1.02, "zone": "Average"},
+    "Jim Reynolds":    {"factor": 1.01, "zone": "Average"},
+    "Bill Miller":     {"factor": 1.00, "zone": "Average"},
+    "John Tumpane":    {"factor": 1.00, "zone": "Average"},
+    "Todd Tichenor":   {"factor": 1.00, "zone": "Average"},
+    "David Rackley":   {"factor": 1.01, "zone": "Average"},
+    "Nate Tomlinson":  {"factor": 1.00, "zone": "Average"},
+    "Alex MacKay":     {"factor": 1.03, "zone": "Average"},
+    "Nestor Ceja":     {"factor": 1.02, "zone": "Average"},
+    "Clint Vondrak":   {"factor": 0.99, "zone": "Average"},
+    "Vic Carapazza":   {"factor": 0.99, "zone": "Tight"},
+    "Brian Gorman":    {"factor": 0.99, "zone": "Tight"},
+    "Mike Everitt":    {"factor": 0.99, "zone": "Tight"},
+    "Stu Scheurwater": {"factor": 0.98, "zone": "Tight"},
+    "Ryan Additon":    {"factor": 0.98, "zone": "Tight"},
+    "Larry Vanover":   {"factor": 0.98, "zone": "Tight"},
+    "Tim Timmons":     {"factor": 0.98, "zone": "Tight"},
+    "Chris Guccione":  {"factor": 0.97, "zone": "Tight"},
+    "Brennan Miller":  {"factor": 0.97, "zone": "Tight"},
+    "Marvin Hudson":   {"factor": 0.97, "zone": "Tight"},
+    "Doug Eddings":    {"factor": 0.96, "zone": "Tight"},
+    "James Hoye":      {"factor": 0.96, "zone": "Tight"},
+    "Jeremie Rehak":   {"factor": 0.96, "zone": "Tight"},
+    "Bob Davidson":    {"factor": 0.95, "zone": "Tight"},
+    "Mike DiMuro":     {"factor": 0.95, "zone": "Tight"},
+    "Jeff Kellogg":    {"factor": 0.95, "zone": "Tight"},
+    "Jerry Meals":     {"factor": 0.94, "zone": "Tight"},
+    "Tom Hallion":     {"factor": 0.94, "zone": "Tight"},
+    "Sam Holbrook":    {"factor": 0.93, "zone": "Tight"},
+    "Ted Barrett":     {"factor": 0.93, "zone": "Tight"},
+    "Mark Wegner":     {"factor": 0.92, "zone": "Tight"},
+    "Lance Barrett":   {"factor": 0.92, "zone": "Tight"},
+}
+
+def get_umpire_data(ump_name):
+    if not ump_name: return 1.0, "Average"
+    for key, val in UMPIRE_DATA.items():
+        if key.lower() in ump_name.lower() or ump_name.lower() in key.lower():
+            return val["factor"], val["zone"]
+    return 1.0, "Average"
+
+def get_umpire_factor(ump_name):
+    return get_umpire_data(ump_name)[0]
+
+@st.cache_data(ttl=3600)
+def fetch_todays_umpires():
+    import requests as _req
+    result = {}
+    try:
+        resp = _req.get(
+            f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today_et()}"
+            f"&hydrate=officials&gameType=R", timeout=8)
+        if resp.status_code != 200: return result
+        for date_entry in resp.json().get('dates', []):
+            for game in date_entry.get('games', []):
+                gid = str(game.get('gamePk', ''))
+                for official in game.get('officials', []):
+                    if official.get('officialType') == 'Home Plate':
+                        name = official.get('official', {}).get('fullName', '')
+                        if name:
+                            result[gid] = name
+                            break
+    except Exception:
+        pass
+    return result
+
 TEAM_RUNS_FALLBACK = {
     "New York Yankees": 4.7, "Boston Red Sox": 4.7, "Toronto Blue Jays": 4.8,
     "Baltimore Orioles": 4.5, "Tampa Bay Rays": 4.1, "Cleveland Guardians": 4.3,
@@ -462,8 +515,7 @@ def fetch_live_team_stats():
         for team in teams_resp.json().get('teams', []):
             team_id = team.get('id')
             team_name = team.get('name', '')
-            if not team_id or not team_name:
-                continue
+            if not team_id or not team_name: continue
             try:
                 h_resp = _req.get(
                     f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
@@ -477,8 +529,7 @@ def fetch_live_team_stats():
                             gp = int(stat.get('gamesPlayed', 0) or 0)
                             if gp >= 5 and runs > 0:
                                 rpg[team_name] = round(runs / gp, 2)
-            except Exception:
-                pass
+            except Exception: pass
             try:
                 p_resp = _req.get(
                     f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
@@ -492,10 +543,8 @@ def fetch_live_team_stats():
                             gp = int(stat.get('gamesPlayed', 0) or 0)
                             if era_val and gp >= 5:
                                 bullpen_era[team_name] = round(float(era_val) * 1.08, 2)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception: pass
+    except Exception: pass
     return rpg, bullpen_era
 
 @st.cache_data(ttl=3600)
@@ -504,8 +553,7 @@ def fetch_live_sp_era(pitcher_name):
         return LEAGUE_AVG_ERA, 'default'
     try:
         results = statsapi.lookup_player(pitcher_name)
-        if not results:
-            raise ValueError("Not found")
+        if not results: raise ValueError("Not found")
         player_id = results[0]['id']
         stats = statsapi.player_stat_data(player_id, group='pitching', type='season', sportId=1)
         if stats and 'stats' in stats:
@@ -517,8 +565,7 @@ def fetch_live_sp_era(pitcher_name):
                     ip = float(s.get('inningsPitched', 0) or 0)
                     if era and ip >= 5:
                         return round(float(era), 2), 'live'
-    except Exception:
-        pass
+    except Exception: pass
     for key in PITCHER_ERA_FALLBACK:
         if key.lower() in pitcher_name.lower() or pitcher_name.lower() in key.lower():
             return PITCHER_ERA_FALLBACK[key], 'fallback'
@@ -526,8 +573,7 @@ def fetch_live_sp_era(pitcher_name):
 
 @st.cache_data(ttl=3600)
 def fetch_recent_era(pitcher_name):
-    if not pitcher_name or pitcher_name == 'TBD':
-        return None
+    if not pitcher_name or pitcher_name == 'TBD': return None
     try:
         results = statsapi.lookup_player(pitcher_name)
         if not results: return None
@@ -540,8 +586,7 @@ def fetch_recent_era(pitcher_name):
         total_ip = sum(float(g.get('inningsPitched', 0)) for g in starts)
         if total_ip < 3: return None
         return round((total_er / total_ip) * 9, 2)
-    except Exception:
-        return None
+    except Exception: return None
 
 WIND_DIR_LABELS = {
     0: "N", 23: "NNE", 45: "NE", 68: "ENE", 90: "E", 113: "ESE",
@@ -553,6 +598,68 @@ def deg_to_label(deg):
     if deg is None: return ""
     return WIND_DIR_LABELS[min(WIND_DIR_LABELS.keys(), key=lambda x: abs(x - deg))]
 
+def wind_direction_label(wind_dir_deg, home_team):
+    """
+    Returns a human-readable wind direction label relative to the field.
+    Examples: '🌬️ Out to CF 12mph', '🌬️ In from LF 8mph', '➡️ L to R 10mph'
+    """
+    orient = None
+    for key, val in STADIUM_ORIENTATION.items():
+        if key.lower() in home_team.lower() or home_team.lower() in key.lower():
+            orient = val
+            break
+    if orient is None:
+        return None
+
+    cf = orient["cf"]
+    lf = orient["lf"]
+    rf = orient["rf"]
+
+    def angle_diff(a, b):
+        diff = abs(a - b) % 360
+        return min(diff, 360 - diff)
+
+    # Wind FROM this direction means blowing toward opposite
+    # Check which field feature the wind is coming from/going to
+    cf_diff = angle_diff(wind_dir_deg, cf)
+    lf_diff = angle_diff(wind_dir_deg, lf)
+    rf_diff = angle_diff(wind_dir_deg, rf)
+
+    # Opposite of CF = home plate direction
+    home_plate = (cf + 180) % 360
+    hp_diff = angle_diff(wind_dir_deg, home_plate)
+    lf_out = (lf + 180) % 360
+    rf_out = (rf + 180) % 360
+    lf_out_diff = angle_diff(wind_dir_deg, lf_out)
+    rf_out_diff = angle_diff(wind_dir_deg, rf_out)
+
+    THRESHOLD = 35  # degrees — within this = aimed at that target
+
+    # Wind blowing OUT (from home toward outfield)
+    if cf_diff <= THRESHOLD:
+        return "Out to CF"
+    if lf_diff <= THRESHOLD:
+        return "Out to LF"
+    if rf_diff <= THRESHOLD:
+        return "Out to RF"
+    # Wind blowing IN (from outfield toward home)
+    if hp_diff <= THRESHOLD:
+        return "In from CF"
+    if lf_out_diff <= THRESHOLD:
+        return "In from LF"
+    if rf_out_diff <= THRESHOLD:
+        return "In from RF"
+    # Crosswind — L to R or R to L
+    # LF is always on left side of batter's view, RF on right
+    # Wind from LF side = blowing L to R
+    lf_side = (lf + cf) / 2 % 360
+    rf_side = (rf + cf) / 2 % 360
+    lf_side_diff = angle_diff(wind_dir_deg, lf_side)
+    rf_side_diff = angle_diff(wind_dir_deg, rf_side)
+    if lf_side_diff < rf_side_diff:
+        return "L to R"
+    return "R to L"
+
 @st.cache_data(ttl=1800)
 def fetch_stadium_weather(home_team, game_hour_utc=None):
     coords = STADIUM_COORDS.get(home_team)
@@ -561,7 +668,7 @@ def fetch_stadium_weather(home_team, game_hour_utc=None):
     try:
         resp = requests.get("https://api.open-meteo.com/v1/forecast", params={
             "latitude": lat, "longitude": lon,
-            "hourly": "temperature_2m,windspeed_10m,winddirection_10m",
+            "hourly": "temperature_2m,windspeed_10m,winddirection_10m,precipitation_probability",
             "temperature_unit": "fahrenheit", "windspeed_unit": "mph",
             "forecast_days": 1, "timezone": "auto",
         }, timeout=8)
@@ -571,6 +678,7 @@ def fetch_stadium_weather(home_team, game_hour_utc=None):
         temps = hourly.get("temperature_2m", [])
         wspeeds = hourly.get("windspeed_10m", [])
         wdirs = hourly.get("winddirection_10m", [])
+        precip_probs = hourly.get("precipitation_probability", [])
         if not times: return None
         target_hour = game_hour_utc if game_hour_utc else datetime.utcnow().hour
         best_idx = 0
@@ -578,20 +686,20 @@ def fetch_stadium_weather(home_team, game_hour_utc=None):
             try:
                 if int(t.split("T")[1][:2]) <= target_hour:
                     best_idx = i
-            except Exception:
-                continue
+            except Exception: continue
         temp = temps[best_idx] if temps else None
         wspeed = wspeeds[best_idx] if wspeeds else 0
         wdir = wdirs[best_idx] if wdirs else 0
+        precip = precip_probs[best_idx] if precip_probs else 0
         return {
             "dome": False,
             "temp_f": round(temp, 1) if temp else None,
             "wind_speed_mph": round(wspeed, 1) if wspeed else 0,
             "wind_dir_deg": round(wdir) if wdir else 0,
             "wind_dir_label": deg_to_label(wdir),
+            "precip_pct": int(precip) if precip else 0,
         }
-    except Exception:
-        return None
+    except Exception: return None
 
 _live_rpg, _live_bullpen = fetch_live_team_stats()
 _todays_umps = fetch_todays_umpires()
@@ -601,8 +709,7 @@ with st.sidebar:
     st.markdown(f"**Supabase:** {'✅ Connected' if supabase_connected else '❌ Not connected'}")
     _odds_key = get_secret("ODDS_API_KEY")
     st.markdown(f"**Odds API:** {'✅ Loaded' if _odds_key else '❌ Missing'}")
-    if _odds_key:
-        st.caption(f"Prefix: {_odds_key[:6]}…")
+    if _odds_key: st.caption(f"Prefix: {_odds_key[:6]}…")
     st.markdown("**Weather:** ✅ Open-Meteo (free)")
     st.markdown(f"**Umpires:** {'✅' if _todays_umps else '⚠️'} {len(_todays_umps)} games")
     st.markdown("---")
@@ -610,13 +717,13 @@ with st.sidebar:
     st.markdown(f"**Live Bullpen ERA:** {'✅' if len(_live_bullpen) >= 20 else '⚠️'} {len(_live_bullpen)} teams")
     st.caption("Live stats kick in after ≥5 games played.")
     st.markdown("---")
-    st.markdown("**V4.35 Improvements:**")
-    st.caption("✅ Edge% column in table")
-    st.caption("✅ Rest flag in table")
-    st.caption("✅ Dome flag in Park column")
-    st.caption("✅ SP ERAs shown in FG section")
-    st.caption("✅ R-Sox / W-Sox fix")
-    st.caption("✅ Centered + tighter columns")
+    st.markdown("**V4.36 Improvements:**")
+    st.caption("✅ Wind: Out/In to LF/CF/RF + L-R/R-L")
+    st.caption("✅ Rain % in table")
+    st.caption("✅ Ump zone: Tight/Average/Loose")
+    st.caption("✅ Full column names")
+    st.caption("✅ Centered columns")
+    st.caption("✅ Cleaner park labels")
 
 def get_team_rpg(team_name):
     for key in _live_rpg:
@@ -648,11 +755,18 @@ def is_dome(home_team):
             return True
     return False
 
+def park_label(home_team, pf):
+    if is_dome(home_team): return "🏟️ Dome"
+    if pf >= 1.04: return f"🏔️ Hitter ({pf:.2f})"
+    if pf > 1.0: return f"⬆️ Slight Hit ({pf:.2f})"
+    if pf == 1.0: return f"➡️ Neutral"
+    if pf >= 0.97: return f"⬇️ Slight Pit ({pf:.2f})"
+    return f"🔒 Pitcher ({pf:.2f})"
+
 def blend_era(pitcher_name):
     season_era, src = fetch_live_sp_era(pitcher_name)
     recent = fetch_recent_era(pitcher_name)
-    if recent is None:
-        return season_era, None, src
+    if recent is None: return season_era, None, src
     return round(season_era * SEASON_ERA_WEIGHT + recent * RECENT_ERA_WEIGHT, 2), recent, src
 
 @st.cache_data(ttl=3600)
@@ -692,14 +806,11 @@ def fetch_recent_team_rpg(team_name, n_games=10):
                     side = 'home' if home_id == team_id else 'away'
                     total_runs += ls.get('teams', {}).get(side, {}).get('runs', 0) or 0
                     count += 1
-            except Exception:
-                continue
+            except Exception: continue
         return round(total_runs / count, 2) if count >= 3 else None
-    except Exception:
-        return None
+    except Exception: return None
 
 def wind_out_factor(wind_dir_deg, home_team):
-    import math
     cf_bearing = STADIUM_CF_BEARING.get(home_team)
     if cf_bearing is None: return 0.0
     angle = (wind_dir_deg - cf_bearing + 180) % 360 - 180
@@ -708,16 +819,19 @@ def wind_out_factor(wind_dir_deg, home_team):
 def weather_adjs(weather, home_team, scale=1.0):
     if not weather or weather.get("dome"):
         return 0.0, 0.0, None
-    import math
     wspeed = weather.get("wind_speed_mph") or 0
     wdir = weather.get("wind_dir_deg") or 0
     w_adj, w_label = 0.0, None
     if wspeed and wspeed >= 8:
         factor = wind_out_factor(wdir, home_team)
         w_adj = round(factor * (wspeed / 10) * 0.3 * scale, 2)
-        if factor > 0.3: w_label = "🌬️ Blowing OUT"
-        elif factor < -0.3: w_label = "🌬️ Blowing IN"
-        else: w_label = "💨 Crosswind"
+        dir_label = wind_direction_label(wdir, home_team)
+        if factor > 0.3:
+            w_label = f"🌬️ Out {dir_label}" if dir_label else "🌬️ Blowing OUT"
+        elif factor < -0.3:
+            w_label = f"🌬️ In {dir_label}" if dir_label else "🌬️ Blowing IN"
+        else:
+            w_label = f"💨 {dir_label}" if dir_label else "💨 Crosswind"
     temp = weather.get("temp_f")
     t_adj = 0.0
     if temp and temp < 60:
@@ -752,7 +866,7 @@ def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, g
     base_adj = round(away_rpg_final + home_rpg_final, 2)
     w_adj, t_adj, w_label = weather_adjs(weather, home, scale=F5_INNINGS / TOTAL_INNINGS)
     ump_name = _todays_umps.get(str(game_id), "") if game_id else ""
-    ump_factor = get_umpire_factor(ump_name)
+    ump_factor, ump_zone = get_umpire_data(ump_name)
     raw = (base_adj + away_sp_adj + home_sp_adj + w_adj + t_adj) * ump_factor
     return {
         "total": round(raw * pf, 1), "base": base_adj,
@@ -763,7 +877,7 @@ def calc_f5(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, g
         "away_hand": away_hand, "home_hand": home_hand,
         "away_rest_adj": away_rest_adj, "away_days_rest": away_days_rest,
         "home_rest_adj": home_rest_adj, "home_days_rest": home_days_rest,
-        "ump_name": ump_name, "ump_factor": ump_factor,
+        "ump_name": ump_name, "ump_factor": ump_factor, "ump_zone": ump_zone,
         "wind_adj": w_adj, "temp_adj": t_adj, "wind_label": w_label,
     }
 
@@ -798,7 +912,7 @@ def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, g
     base_adj = round(away_rpg_final + home_rpg_final, 1)
     w_adj, t_adj, w_label = weather_adjs(weather, home, scale=1.0)
     ump_name = _todays_umps.get(str(game_id), "") if game_id else ""
-    ump_factor = get_umpire_factor(ump_name)
+    ump_factor, ump_zone = get_umpire_data(ump_name)
     raw = (base_adj + away_sp_adj + home_sp_adj + away_bp_adj + home_bp_adj + w_adj + t_adj) * ump_factor
     return {
         "total": round(raw * pf, 1), "base": base_adj,
@@ -811,13 +925,12 @@ def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, g
         "home_rest_adj": home_rest_adj, "home_days_rest": home_days_rest,
         "away_hand": away_hand, "home_hand": home_hand,
         "away_platoon": away_platoon, "home_platoon": home_platoon,
-        "ump_name": ump_name, "ump_factor": ump_factor,
+        "ump_name": ump_name, "ump_factor": ump_factor, "ump_zone": ump_zone,
         "wind_adj": w_adj, "temp_adj": t_adj, "wind_label": w_label,
     }
 
 @st.cache_data(ttl=3600)
 def poisson_over_prob(lam, line):
-    import math
     k_max = int(line)
     cdf = sum((math.exp(-lam) * (lam ** k)) / math.factorial(k) for k in range(k_max + 1))
     return max(0.10, min(0.90, 1.0 - cdf))
@@ -851,12 +964,10 @@ def calc_kelly(edge):
     return round(bet_pct * 100, 1), round(BANKROLL * bet_pct, 2)
 
 def abbrev_team(name):
-    """Smart abbreviation — handles Sox ambiguity."""
     parts = name.split()
-    last = parts[-1] if parts else name
     if "Red Sox" in name: return "R-Sox"
     if "White Sox" in name: return "W-Sox"
-    return last
+    return parts[-1] if parts else name
 
 def abbrev_pitcher(name):
     if not name or name == "TBD": return "TBD"
@@ -865,9 +976,9 @@ def abbrev_pitcher(name):
 
 def rest_flag(days_rest):
     if days_rest is None: return ""
-    if days_rest <= 3: return "⚠️S"
-    if days_rest >= 7: return "💤L"
-    return ""
+    if days_rest <= 3: return "⚠️ Short"
+    if days_rest >= 7: return "💤 Long"
+    return "✅"
 
 def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
                  away_pitcher, home_pitcher, market_type, today):
@@ -962,8 +1073,7 @@ def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=No
             if ar is None or hr is None: return None
             return int(ar), int(hr), int(ar) + int(hr)
         return None
-    except Exception:
-        return None
+    except Exception: return None
 
 def settle_result(actual_total, kalshi_line, bet_direction, bet_amount, kalshi_over_price):
     if actual_total == kalshi_line: return "PUSH", 0.0
@@ -996,13 +1106,11 @@ def run_auto_settlement():
                     "settled_at": datetime.utcnow().isoformat(),
                 }).eq("id", row["id"]).execute()
                 settled += 1
-            except Exception:
-                skipped += 1
+            except Exception: skipped += 1
         msg = f"✅ Auto-settlement: {settled} settled"
         if skipped: msg += f", {skipped} skipped"
         return msg
-    except Exception:
-        return None
+    except Exception: return None
 
 @st.cache_data(ttl=60)
 def fetch_kalshi_lines():
@@ -1054,8 +1162,7 @@ def fetch_odds_lines():
                 m = sorted(totals, key=lambda x: x["total"])[len(totals) // 2]
                 result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
         return result
-    except Exception:
-        return {}
+    except Exception: return {}
 
 def match_kalshi(away, home, lines, mtype="full"):
     for (ka, kh, kt), data in lines.items():
@@ -1135,34 +1242,57 @@ with tab1:
                     _f5_sig, _f5_dir = _signal(_f5_lean, _f5_edge, _f5_default_blocked)
                     _fg_sig, _fg_dir = _signal(_fg_lean, _fg_edge, _fg_default_blocked)
 
-                    # Park — emoji only + dome flag
-                    _pf_emoji = "🏟️" if _dome else ("🏔️" if _pf >= 1.04 else "⬆️" if _pf > 1.0 else "➡️" if _pf == 1.0 else "⬇️")
+                    # Park label
+                    _park_str = park_label(_home, _pf)
+
+                    # Wind
+                    _wind_str = "🏟️ Dome" if _dome else ""
+                    if not _dome and _wx:
+                        wspeed = _wx.get("wind_speed_mph", 0)
+                        wdir = _wx.get("wind_dir_deg", 0)
+                        precip = _wx.get("precip_pct", 0)
+                        if wspeed and wspeed >= 5:
+                            dir_label = wind_direction_label(wdir, _home) or _wx.get("wind_dir_label", "")
+                            factor = wind_out_factor(wdir, _home)
+                            arrow = "🌬️" if abs(factor) > 0.3 else "💨"
+                            _wind_str = f"{arrow} {dir_label} {int(wspeed)}mph"
+                        else:
+                            _wind_str = f"🌤️ Calm"
+                        if precip and precip >= 20:
+                            _wind_str += f" 🌧️{precip}%"
 
                     # Rest flags
-                    _away_rest = rest_flag(_f5.get("away_days_rest"))
-                    _home_rest = rest_flag(_f5.get("home_days_rest"))
-                    _rest_str = f"{_away_rest}{_home_rest}" if (_away_rest or _home_rest) else "✅"
+                    _away_rest = _f5.get("away_days_rest")
+                    _home_rest = _f5.get("home_days_rest")
+                    _rest_str = ""
+                    if _away_rest and _away_rest <= 3: _rest_str += "⚠️Away "
+                    if _home_rest and _home_rest <= 3: _rest_str += "⚠️Home"
+                    if not _rest_str: _rest_str = "✅"
+
+                    # Umpire
+                    _ump_name = _f5.get("ump_name", "")
+                    _ump_zone = _f5.get("ump_zone", "Average")
+                    _ump_last = _ump_name.split()[-1] if _ump_name else "TBA"
+                    _zone_icon = "🔼" if _ump_zone == "Loose" else "🔽" if _ump_zone == "Tight" else "➡️"
+                    _ump_str = f"{_ump_last} {_zone_icon}{_ump_zone}" if _ump_name else "TBA"
 
                     # Edge %
                     _f5_edge_pct = f"{'+' if _f5_edge > 0 else ''}{round(_f5_edge*100,1)}%" if not _f5_default_blocked else "—"
                     _fg_edge_pct = f"{'+' if _fg_edge > 0 else ''}{round(_fg_edge*100,1)}%" if not _fg_default_blocked else "—"
 
-                    _away_abbr = abbrev_team(_away)
-                    _home_abbr = abbrev_team(_home)
-                    _ap_abbr = abbrev_pitcher(_ap)
-                    _hp_abbr = abbrev_pitcher(_hp)
                     _vegas_str = f"{_odds['total']}" if _odds else "—"
 
                     rows.append({
                         "Time": _et,
-                        "Matchup": f"{_away_abbr}@{_home_abbr}",
-                        "Away SP": _ap_abbr,
-                        "Home SP": _hp_abbr,
-                        "Park": _pf_emoji,
+                        "Matchup": f"{abbrev_team(_away)}@{abbrev_team(_home)}",
+                        "Away SP": abbrev_pitcher(_ap),
+                        "Home SP": abbrev_pitcher(_hp),
+                        "Park": _park_str,
+                        "Wind / Weather": _wind_str,
                         "Rest": _rest_str,
-                        "Ump": _f5.get("ump_name", "TBA").split()[-1] if _f5.get("ump_name") else "TBA",
-                        "Mkt": "F5",
-                        "Mdl": _f5["total"],
+                        "Umpire": _ump_str,
+                        "Market": "F5",
+                        "Model": _f5["total"],
                         "Line": f"{_f5_line}{'✅' if _k5 else '~'}",
                         "Vegas": "—",
                         "Edge%": _f5_edge_pct,
@@ -1170,9 +1300,9 @@ with tab1:
                     })
                     rows.append({
                         "Time": "", "Matchup": "", "Away SP": "", "Home SP": "",
-                        "Park": "", "Rest": "", "Ump": "",
-                        "Mkt": "FG",
-                        "Mdl": _fg["total"],
+                        "Park": "", "Wind / Weather": "", "Rest": "", "Umpire": "",
+                        "Market": "FG",
+                        "Model": _fg["total"],
                         "Line": f"{_fg_line}{'✅' if _kf else '~'}",
                         "Vegas": _vegas_str,
                         "Edge%": _fg_edge_pct,
@@ -1197,42 +1327,37 @@ with tab1:
                                      horizontal=True, label_visibility="collapsed")
                 df_all = pd.DataFrame(rows)
 
-                # Center all columns
-                styled = df_all.style.set_properties(**{'text-align': 'center'})
+                col_cfg = {
+                    "Time":          st.column_config.TextColumn(width="small"),
+                    "Matchup":       st.column_config.TextColumn(width="medium"),
+                    "Away SP":       st.column_config.TextColumn(width="small"),
+                    "Home SP":       st.column_config.TextColumn(width="small"),
+                    "Park":          st.column_config.TextColumn(width="medium"),
+                    "Wind / Weather":st.column_config.TextColumn(width="medium"),
+                    "Rest":          st.column_config.TextColumn(width="small"),
+                    "Umpire":        st.column_config.TextColumn(width="medium"),
+                    "Market":        st.column_config.TextColumn(width="small"),
+                    "Model":         st.column_config.NumberColumn(width="small", format="%.1f"),
+                    "Line":          st.column_config.TextColumn(width="small"),
+                    "Vegas":         st.column_config.TextColumn(width="small"),
+                    "Edge%":         st.column_config.TextColumn(width="small"),
+                    "Signal":        st.column_config.TextColumn(width="large"),
+                }
 
                 if view_type == "📱 Mobile":
-                    mobile_cols = ["Time", "Matchup", "Mkt", "Mdl", "Line", "Edge%", "Signal"]
-                    st.dataframe(df_all[mobile_cols].style.set_properties(**{'text-align': 'center'}),
-                                 use_container_width=True, hide_index=True,
-                                 column_config={
-                                     "Time": st.column_config.TextColumn(width="small"),
-                                     "Matchup": st.column_config.TextColumn(width="medium"),
-                                     "Mkt": st.column_config.TextColumn(width="small"),
-                                     "Mdl": st.column_config.NumberColumn(width="small", format="%.1f"),
-                                     "Line": st.column_config.TextColumn(width="small"),
-                                     "Edge%": st.column_config.TextColumn(width="small"),
-                                     "Signal": st.column_config.TextColumn(width="large"),
-                                 })
+                    mobile_cols = ["Time", "Matchup", "Market", "Model", "Line", "Edge%", "Signal"]
+                    st.dataframe(
+                        df_all[mobile_cols].style.set_properties(**{'text-align': 'center'}),
+                        use_container_width=True, hide_index=True,
+                        column_config={k: col_cfg[k] for k in mobile_cols})
                 else:
-                    desktop_cols = ["Time", "Matchup", "Away SP", "Home SP", "Park", "Rest", "Ump",
-                                    "Mkt", "Mdl", "Line", "Vegas", "Edge%", "Signal"]
-                    st.dataframe(df_all[desktop_cols].style.set_properties(**{'text-align': 'center'}),
-                                 use_container_width=True, hide_index=True,
-                                 column_config={
-                                     "Time": st.column_config.TextColumn(width="small"),
-                                     "Matchup": st.column_config.TextColumn(width="medium"),
-                                     "Away SP": st.column_config.TextColumn(width="small"),
-                                     "Home SP": st.column_config.TextColumn(width="small"),
-                                     "Park": st.column_config.TextColumn(width="small"),
-                                     "Rest": st.column_config.TextColumn(width="small"),
-                                     "Ump": st.column_config.TextColumn(width="small"),
-                                     "Mkt": st.column_config.TextColumn(width="small"),
-                                     "Mdl": st.column_config.NumberColumn(width="small", format="%.1f"),
-                                     "Line": st.column_config.TextColumn(width="small"),
-                                     "Vegas": st.column_config.TextColumn(width="small"),
-                                     "Edge%": st.column_config.TextColumn(width="small"),
-                                     "Signal": st.column_config.TextColumn(width="large"),
-                                 })
+                    desktop_cols = ["Time", "Matchup", "Away SP", "Home SP", "Park",
+                                    "Wind / Weather", "Rest", "Umpire",
+                                    "Market", "Model", "Line", "Vegas", "Edge%", "Signal"]
+                    st.dataframe(
+                        df_all[desktop_cols].style.set_properties(**{'text-align': 'center'}),
+                        use_container_width=True, hide_index=True,
+                        column_config={k: col_cfg[k] for k in desktop_cols})
                 st.markdown("---")
 
             for game in schedule:
@@ -1261,11 +1386,13 @@ with tab1:
                             f"**Away SP:** {ap} ({f5['away_hand']}HP) | ERA: {f5['away_era']} {away_src}{away_plat_str}{away_rest_str}  \n"
                             f"**Home SP:** {hp} ({f5['home_hand']}HP) | ERA: {f5['home_era']} {home_src}{home_plat_str}{home_rest_str}"
                         )
+
                         ump_name = f5.get("ump_name", "")
                         ump_factor = f5.get("ump_factor", 1.0)
+                        ump_zone = f5.get("ump_zone", "Average")
                         if ump_name:
-                            ump_label = "🔼 Run inflator" if ump_factor > 1.01 else "🔽 Run suppressor" if ump_factor < 0.99 else "➡️ Neutral"
-                            st.caption(f"👤 HP Ump: **{ump_name}** | Factor: {ump_factor:.2f} {ump_label}")
+                            zone_icon = "🔼" if ump_zone == "Loose" else "🔽" if ump_zone == "Tight" else "➡️"
+                            st.caption(f"👤 HP Ump: **{ump_name}** | Zone: {zone_icon} {ump_zone} | Run factor: {ump_factor:.2f}")
                         else:
                             st.caption("👤 HP Ump: Not yet announced")
 
@@ -1275,21 +1402,24 @@ with tab1:
                             wx_str = "🏟️ Dome — weather N/A"
                         else:
                             temp = wx.get("temp_f")
-                            ws = wx.get("wind_speed_mph", 0)
-                            wd = wx.get("wind_dir_label", "")
+                            wspeed = wx.get("wind_speed_mph", 0)
+                            wdir = wx.get("wind_dir_deg", 0)
+                            precip = wx.get("precip_pct", 0)
+                            dir_label = wind_direction_label(wdir, home) or wx.get("wind_dir_label", "")
                             w_label = fg.get("wind_label") or f5.get("wind_label") or ""
-                            wx_str = f"🌡️ {temp}°F | 💨 {ws}mph {wd} {w_label}" if temp else "⚠️ No temp data"
+                            wx_str = f"🌡️ {temp}°F | 💨 {int(wspeed)}mph {dir_label} {w_label}" if temp else "⚠️ No temp data"
+                            if precip and precip >= 20:
+                                wx_str += f" | 🌧️ Rain: {precip}%"
 
                         cA, cB = st.columns(2)
                         with cA:
-                            park_label = 'Hitter' if pf > 1.0 else 'Pitcher' if pf < 1.0 else 'Neutral'
-                            st.metric("🏟️ Park", pf, delta=park_label)
+                            park_str = park_label(home, pf)
+                            st.metric("🏟️ Park", park_str)
                         with cB:
                             st.info(wx_str)
 
                         st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
 
-                        # ── F5 Section ────────────────────────────────────────
                         st.markdown('<div class="section-header">⚾ First 5 Innings</div>', unsafe_allow_html=True)
                         cF1, cF2 = st.columns(2)
                         with cF1:
@@ -1314,7 +1444,6 @@ with tab1:
 
                         st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
 
-                        # ── FG Section ────────────────────────────────────────
                         st.markdown('<div class="section-header">🏟️ Full Game</div>', unsafe_allow_html=True)
                         cG1, cG2 = st.columns(2)
                         with cG1:
@@ -1324,7 +1453,6 @@ with tab1:
                                       delta=f"Recent: {fg['away_recent']}" if fg["away_recent"] else "Season only")
                         st.metric(f"Home ERA ({hp})", fg["home_era"],
                                   delta=f"Recent: {fg['home_recent']}" if fg["home_recent"] else "Season only")
-
                         cB1, cB2 = st.columns(2)
                         with cB1:
                             st.metric("Away Bullpen", fg["away_bp_era"],
