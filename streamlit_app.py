@@ -663,7 +663,7 @@ def fetch_stadium_weather(home_team, game_hour_utc=None):
             "precip_pct": int(precip) if precip else 0,
         }
     except Exception: return None
-        _live_rpg, _live_bullpen = fetch_live_team_stats()
+_live_rpg, _live_bullpen = fetch_live_team_stats()
 _todays_umps = fetch_todays_umpires()
 
 with st.sidebar:
