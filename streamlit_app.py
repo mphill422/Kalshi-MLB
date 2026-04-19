@@ -507,11 +507,13 @@ def fetch_live_team_stats():
     try:
         teams_resp = _req.get(
             f"https://statsapi.mlb.com/api/v1/teams?sportId=1&season={season}", timeout=10)
-        if teams_resp.status_code != 200: return rpg, bullpen_era
+        if teams_resp.status_code != 200:
+            return rpg, bullpen_era
         for team in teams_resp.json().get('teams', []):
             team_id = team.get('id')
             team_name = team.get('name', '')
-            if not team_id or not team_name: continue
+            if not team_id or not team_name:
+                continue
             try:
                 h_resp = _req.get(
                     f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
@@ -525,7 +527,8 @@ def fetch_live_team_stats():
                             gp = int(stat.get('gamesPlayed', 0) or 0)
                             if gp >= 5 and runs > 0:
                                 rpg[team_name] = min(round(runs / gp, 2), MAX_TEAM_RPG)
-            except Exception: pass
+            except Exception:
+                pass
             try:
                 p_resp = _req.get(
                     f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
@@ -539,8 +542,10 @@ def fetch_live_team_stats():
                             gp = int(stat.get('gamesPlayed', 0) or 0)
                             if era_val and gp >= 5:
                                 bullpen_era[team_name] = round(float(era_val) * 1.08, 2)
-            except Exception: pass
-    except Exception: pass
+            except Exception:
+                pass
+    except Exception:
+        pass
     return rpg, bullpen_era
 
 def apply_era_regression(era_val, ip):
@@ -554,7 +559,8 @@ def fetch_live_sp_era(pitcher_name):
         return LEAGUE_AVG_ERA, 'default'
     try:
         results = statsapi.lookup_player(pitcher_name)
-        if not results: raise ValueError("Not found")
+        if not results:
+            raise ValueError("Not found")
         player_id = results[0]['id']
         stats = statsapi.player_stat_data(player_id, group='pitching', type='season', sportId=1)
         if stats and 'stats' in stats:
@@ -566,7 +572,8 @@ def fetch_live_sp_era(pitcher_name):
                     ip = float(s.get('inningsPitched', 0) or 0)
                     if era and ip >= 5:
                         return round(apply_era_regression(float(era), ip), 2), 'live'
-    except Exception: pass
+    except Exception:
+        pass
     for key in PITCHER_ERA_FALLBACK:
         if key.lower() in pitcher_name.lower() or pitcher_name.lower() in key.lower():
             return apply_era_regression(PITCHER_ERA_FALLBACK[key], 0), 'fallback'
@@ -574,20 +581,26 @@ def fetch_live_sp_era(pitcher_name):
 
 @st.cache_data(ttl=3600)
 def fetch_recent_era(pitcher_name):
-    if not pitcher_name or pitcher_name == 'TBD': return None
+    if not pitcher_name or pitcher_name == 'TBD':
+        return None
     try:
         results = statsapi.lookup_player(pitcher_name)
-        if not results: return None
+        if not results:
+            return None
         player_id = results[0]['id']
         logs = statsapi.player_stat_data(player_id, group='pitching', type='gameLog', sportId=1)
-        if not logs or 'stats' not in logs: return None
+        if not logs or 'stats' not in logs:
+            return None
         starts = [g for g in logs['stats'] if g.get('gamesStarted', 0) >= 1][-3:]
-        if not starts: return None
+        if not starts:
+            return None
         total_er = sum(float(g.get('earnedRuns', 0)) for g in starts)
         total_ip = sum(float(g.get('inningsPitched', 0)) for g in starts)
-        if total_ip < 3: return None
+        if total_ip < 3:
+            return None
         return apply_era_regression(round((total_er / total_ip) * 9, 2), total_ip)
-    except Exception: return None
+    except Exception:
+        return None
 
 WIND_DIR_LABELS = {
     0: "N", 23: "NNE", 45: "NE", 68: "ENE", 90: "E", 113: "ESE",
@@ -596,7 +609,8 @@ WIND_DIR_LABELS = {
 }
 
 def deg_to_label(deg):
-    if deg is None: return ""
+    if deg is None:
+        return ""
     return WIND_DIR_LABELS[min(WIND_DIR_LABELS.keys(), key=lambda x: abs(x - deg))]
 
 def wind_direction_label(wind_dir_deg, home_team):
@@ -605,7 +619,8 @@ def wind_direction_label(wind_dir_deg, home_team):
         if key.lower() in home_team.lower() or home_team.lower() in key.lower():
             orient = val
             break
-    if orient is None: return None
+    if orient is None:
+        return None
     cf, lf, rf = orient["cf"], orient["lf"], orient["rf"]
     def angle_diff(a, b):
         diff = abs(a - b) % 360
@@ -620,13 +635,14 @@ def wind_direction_label(wind_dir_deg, home_team):
     lf_side = (lf + cf) / 2 % 360
     rf_side = (rf + cf) / 2 % 360
     if angle_diff(wind_dir_deg, lf_side) < angle_diff(wind_dir_deg, rf_side):
-        return "L→R"
-    return "R→L"
+        return "L->R"
+    return "R->L"
 
 @st.cache_data(ttl=1800)
 def fetch_stadium_weather(home_team, game_hour_utc=None):
     coords = STADIUM_COORDS.get(home_team)
-    if coords is None: return {"dome": True}
+    if coords is None:
+        return {"dome": True}
     lat, lon = coords
     try:
         resp = requests.get("https://api.open-meteo.com/v1/forecast", params={
@@ -635,21 +651,24 @@ def fetch_stadium_weather(home_team, game_hour_utc=None):
             "temperature_unit": "fahrenheit", "windspeed_unit": "mph",
             "forecast_days": 1, "timezone": "auto",
         }, timeout=8)
-        if resp.status_code != 200: return None
+        if resp.status_code != 200:
+            return None
         hourly = resp.json().get("hourly", {})
         times = hourly.get("time", [])
         temps = hourly.get("temperature_2m", [])
         wspeeds = hourly.get("windspeed_10m", [])
         wdirs = hourly.get("winddirection_10m", [])
         precip_probs = hourly.get("precipitation_probability", [])
-        if not times: return None
+        if not times:
+            return None
         target_hour = game_hour_utc if game_hour_utc else datetime.utcnow().hour
         best_idx = 0
         for i, t in enumerate(times):
             try:
                 if int(t.split("T")[1][:2]) <= target_hour:
                     best_idx = i
-            except Exception: continue
+            except Exception:
+                continue
         temp = temps[best_idx] if temps else None
         wspeed = wspeeds[best_idx] if wspeeds else 0
         wdir = wdirs[best_idx] if wdirs else 0
@@ -662,7 +681,9 @@ def fetch_stadium_weather(home_team, game_hour_utc=None):
             "wind_dir_label": deg_to_label(wdir),
             "precip_pct": int(precip) if precip else 0,
         }
-    except Exception: return None
+    except Exception:
+        return None
+
 _live_rpg, _live_bullpen = fetch_live_team_stats()
 _todays_umps = fetch_todays_umpires()
 
@@ -671,21 +692,21 @@ with st.sidebar:
     st.markdown(f"**Supabase:** {'✅ Connected' if supabase_connected else '❌ Not connected'}")
     _odds_key = get_secret("ODDS_API_KEY")
     st.markdown(f"**Odds API:** {'✅ Loaded' if _odds_key else '❌ Missing'}")
-    if _odds_key: st.caption(f"Prefix: {_odds_key[:6]}…")
-    st.markdown("**Weather:** ✅ Open-Meteo (free)")
+    if _odds_key: st.caption(f"Prefix: {_odds_key[:6]}...")
+    st.markdown("**Weather:** Open-Meteo (free)")
     st.markdown(f"**Umpires:** {'✅' if _todays_umps else '⚠️'} {len(_todays_umps)} games")
     st.markdown("---")
     st.markdown(f"**Live RPG:** {'✅' if len(_live_rpg) >= 20 else '⚠️'} {len(_live_rpg)} teams")
     st.markdown(f"**Live Bullpen ERA:** {'✅' if len(_live_bullpen) >= 20 else '⚠️'} {len(_live_bullpen)} teams")
-    st.caption("Live stats kick in after ≥5 games played.")
+    st.caption("Live stats kick in after 5+ games played.")
     st.markdown("---")
     st.markdown("**V4.37 Improvements:**")
-    st.caption("✅ ERA regression floor (sub-2.00 → 3.00)")
-    st.caption("✅ RPG cap at 6.5 max")
-    st.caption("✅ Colorado away RPG → 3.5")
-    st.caption("✅ Dome team road RPG corrected")
-    st.caption("✅ Table fits screen — no H-scroll")
-    st.caption("✅ Conditions column: Park + Wind combined")
+    st.caption("ERA regression floor (sub-2.00 to 3.00)")
+    st.caption("RPG cap at 6.5 max")
+    st.caption("Colorado away RPG 3.5")
+    st.caption("Dome team road RPG corrected")
+    st.caption("Table fits screen no H-scroll")
+    st.caption("Conditions column Park + Wind combined")
 
 def get_team_rpg(team_name):
     for key in _live_rpg:
@@ -720,7 +741,8 @@ def is_dome(home_team):
 def blend_era(pitcher_name):
     season_era, src = fetch_live_sp_era(pitcher_name)
     recent = fetch_recent_era(pitcher_name)
-    if recent is None: return season_era, None, src
+    if recent is None:
+        return season_era, None, src
     return round(season_era * SEASON_ERA_WEIGHT + recent * RECENT_ERA_WEIGHT, 2), recent, src
 
 @st.cache_data(ttl=3600)
@@ -730,27 +752,32 @@ def fetch_recent_team_rpg(team_name, n_games=10):
         season = datetime.today().year
         teams_resp = _req.get(
             f"https://statsapi.mlb.com/api/v1/teams?sportId=1&season={season}", timeout=8)
-        if teams_resp.status_code != 200: return None
+        if teams_resp.status_code != 200:
+            return None
         team_id = None
         for t in teams_resp.json().get('teams', []):
             name = t.get('name', '')
             if name.lower() in team_name.lower() or team_name.lower() in name.lower():
                 team_id = t['id']
                 break
-        if not team_id: return None
+        if not team_id:
+            return None
         start = (datetime.today() - timedelta(days=20)).strftime('%Y-%m-%d')
         sched_resp = _req.get(
             f"https://statsapi.mlb.com/api/v1/schedule?teamId={team_id}"
             f"&startDate={start}&endDate={today_et()}&sportId=1&gameType=R", timeout=8)
-        if sched_resp.status_code != 200: return None
+        if sched_resp.status_code != 200:
+            return None
         games = [g for d in sched_resp.json().get('dates', [])
                  for g in d.get('games', [])
                  if g.get('status', {}).get('abstractGameState') == 'Final']
-        if len(games) < 3: return None
+        if len(games) < 3:
+            return None
         total_runs, count = 0, 0
         for game in games[-n_games:]:
             gid = game.get('gamePk')
-            if not gid: continue
+            if not gid:
+                continue
             try:
                 box_resp = _req.get(
                     f"https://statsapi.mlb.com/api/v1/game/{gid}/linescore", timeout=5)
@@ -760,15 +787,18 @@ def fetch_recent_team_rpg(team_name, n_games=10):
                     side = 'home' if home_id == team_id else 'away'
                     total_runs += ls.get('teams', {}).get(side, {}).get('runs', 0) or 0
                     count += 1
-            except Exception: continue
+            except Exception:
+                continue
         if count >= 3:
             return min(round(total_runs / count, 2), MAX_TEAM_RPG)
-    except Exception: pass
+    except Exception:
+        pass
     return None
 
 def wind_out_factor(wind_dir_deg, home_team):
     cf_bearing = STADIUM_CF_BEARING.get(home_team)
-    if cf_bearing is None: return 0.0
+    if cf_bearing is None:
+        return 0.0
     angle = (wind_dir_deg - cf_bearing + 180) % 360 - 180
     return round(math.cos(math.radians(angle)), 3)
 
@@ -783,11 +813,11 @@ def weather_adjs(weather, home_team, scale=1.0):
         w_adj = round(factor * (wspeed / 10) * 0.3 * scale, 2)
         dir_label = wind_direction_label(wdir, home_team)
         if factor > 0.3:
-            w_label = f"🌬️ {dir_label}" if dir_label else "🌬️ Out"
+            w_label = f"Out {dir_label}" if dir_label else "Out"
         elif factor < -0.3:
-            w_label = f"🌬️ {dir_label}" if dir_label else "🌬️ In"
+            w_label = f"In {dir_label}" if dir_label else "In"
         else:
-            w_label = f"💨 {dir_label}" if dir_label else "💨 Cross"
+            w_label = f"{dir_label}" if dir_label else "Cross"
     temp = weather.get("temp_f")
     t_adj = 0.0
     if temp and temp < 60:
@@ -919,18 +949,33 @@ def calc_kelly(edge):
     bet_pct = min((edge / 1.0) * KELLY_FRACTION, MAX_BET_PCT)
     return round(bet_pct * 100, 1), round(BANKROLL * bet_pct, 2)
 
+TEAM_ABBREV = {
+    "Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL", "Baltimore Orioles": "BAL",
+    "Boston Red Sox": "BOS", "Chicago Cubs": "CHC", "Chicago White Sox": "CWS",
+    "Cincinnati Reds": "CIN", "Cleveland Guardians": "CLE", "Colorado Rockies": "COL",
+    "Detroit Tigers": "DET", "Houston Astros": "HOU", "Kansas City Royals": "KC",
+    "Los Angeles Angels": "LAA", "Los Angeles Dodgers": "LAD", "Miami Marlins": "MIA",
+    "Milwaukee Brewers": "MIL", "Minnesota Twins": "MIN", "New York Mets": "NYM",
+    "New York Yankees": "NYY", "Oakland Athletics": "OAK", "Athletics": "OAK",
+    "Philadelphia Phillies": "PHI", "Pittsburgh Pirates": "PIT", "San Diego Padres": "SD",
+    "San Francisco Giants": "SF", "Seattle Mariners": "SEA", "St. Louis Cardinals": "STL",
+    "Tampa Bay Rays": "TB", "Texas Rangers": "TEX", "Toronto Blue Jays": "TOR",
+    "Washington Nationals": "WSH",
+}
+
 def abbrev_team(name):
-    if "Red Sox" in name: return "R-Sox"
-    if "White Sox" in name: return "W-Sox"
+    for key, abbr in TEAM_ABBREV.items():
+        if key.lower() in name.lower() or name.lower() in key.lower():
+            return abbr
     parts = name.split()
-    return parts[-1] if parts else name
+    return parts[-1][:4] if parts else name
 
 def abbrev_pitcher(name, days_rest=None):
     if not name or name == "TBD": return "TBD"
     p = name.split()
     abbr = f"{p[0][0]}.{p[-1]}" if len(p) >= 2 else name
     if days_rest is not None and days_rest <= 3:
-        abbr = f"⚠️{abbr}"
+        abbr = f"!{abbr}"
     return abbr
 
 def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
@@ -938,7 +983,7 @@ def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
     _is_default = (market_type == "full" and line == DEFAULT_FG_LINE and not odds_lines) or \
                   (market_type == "f5" and line == DEFAULT_F5_LINE and not odds_lines)
     if _is_default:
-        st.warning(f"⚠️ **Default line ({line}) — Odds API unavailable.** No signals until real Vegas line loads.")
+        st.warning(f"Default line ({line}) - Odds API unavailable. No signals until real Vegas line loads.")
         return 0.0, 0.0
     prob_detail = model_to_prob_detail(model_total, line)
     auto_prob = int(prob_detail["final"])
@@ -946,7 +991,7 @@ def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
     over_edge = (auto_prob / 100) - implied
     under_edge = (1 - auto_prob / 100) - (1 - implied)
     st.caption(
-        f"🎲 Model: {prob_detail['final']}% OVER | "
+        f"Model: {prob_detail['final']}% OVER | "
         f"Poisson: {prob_detail['poisson']}% | "
         f"MC: {prob_detail['monte_carlo']}% | "
         f"Implied: {round(implied * 100, 1)}%"
@@ -956,38 +1001,38 @@ def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
         e = round(over_edge * 100, 1)
         if over_edge >= EDGE_THRESHOLD:
             _, bet_amt = calc_kelly(over_edge)
-            st.success(f"🟢 **OVER** | Edge: +{e}% | Kelly: ${bet_amt}")
+            st.success(f"OVER | Edge: +{e}% | Kelly: ${bet_amt}")
             if supabase_connected:
-                placed = st.checkbox("📍 Placed on Kalshi", key=f"placed_{prefix}_over_{game_id}")
+                placed = st.checkbox("Placed on Kalshi", key=f"placed_{prefix}_over_{game_id}")
                 real_amt = None
                 if placed:
                     real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
                         value=float(bet_amt), step=1.0, key=f"real_{prefix}_over_{game_id}")
-                if st.button(f"📝 Log {prefix} OVER", key=f"log_{prefix}_over_{game_id}"):
+                if st.button(f"Log {prefix} OVER", key=f"log_{prefix}_over_{game_id}"):
                     if save_bet(today, away, home, away_pitcher, home_pitcher,
                                 model_total, line, price_cents, auto_prob, auto_prob,
                                 over_edge, "OVER", bet_amt, market_type, game_id):
                         st.success("Logged!")
         else:
-            st.info(f"⚪ **OVER** | Edge: {e}%")
+            st.info(f"OVER | Edge: {e}%")
     with col_u:
         e = round(under_edge * 100, 1)
         if under_edge >= EDGE_THRESHOLD:
             _, bet_amt = calc_kelly(under_edge)
-            st.success(f"🔴 **UNDER** | Edge: +{e}% | Kelly: ${bet_amt}")
+            st.success(f"UNDER | Edge: +{e}% | Kelly: ${bet_amt}")
             if supabase_connected:
-                placed = st.checkbox("📍 Placed on Kalshi", key=f"placed_{prefix}_under_{game_id}")
+                placed = st.checkbox("Placed on Kalshi", key=f"placed_{prefix}_under_{game_id}")
                 real_amt = None
                 if placed:
                     real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
                         value=float(bet_amt), step=1.0, key=f"real_{prefix}_under_{game_id}")
-                if st.button(f"📝 Log {prefix} UNDER", key=f"log_{prefix}_under_{game_id}"):
+                if st.button(f"Log {prefix} UNDER", key=f"log_{prefix}_under_{game_id}"):
                     if save_bet(today, away, home, away_pitcher, home_pitcher,
                                 model_total, line, price_cents, auto_prob, auto_prob,
                                 under_edge, "UNDER", bet_amt, market_type, game_id):
                         st.success("Logged!")
         else:
-            st.info(f"⚪ **UNDER** | Edge: {e}%")
+            st.info(f"UNDER | Edge: {e}%")
     return over_edge, under_edge
 
 def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
@@ -1018,15 +1063,16 @@ def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=No
         if not games: return None
         for g in games:
             if not game_id:
-                if not (away_team and away_team.lower() in g.get('away_name','').lower()): continue
-                if not (home_team and home_team.lower() in g.get('home_name','').lower()): continue
-            if not any(s.lower() in g.get('status','').lower() for s in ['final','game over','completed']):
+                if not (away_team and away_team.lower() in g.get('away_name', '').lower()): continue
+                if not (home_team and home_team.lower() in g.get('home_name', '').lower()): continue
+            if not any(s.lower() in g.get('status', '').lower() for s in ['final', 'game over', 'completed']):
                 return None
             ar, hr = g.get('away_score'), g.get('home_score')
             if ar is None or hr is None: return None
             return int(ar), int(hr), int(ar) + int(hr)
         return None
-    except Exception: return None
+    except Exception:
+        return None
 
 def settle_result(actual_total, kalshi_line, bet_direction, bet_amount, kalshi_over_price):
     if actual_total == kalshi_line: return "PUSH", 0.0
@@ -1059,11 +1105,13 @@ def run_auto_settlement():
                     "settled_at": datetime.utcnow().isoformat(),
                 }).eq("id", row["id"]).execute()
                 settled += 1
-            except Exception: skipped += 1
-        msg = f"✅ Auto-settlement: {settled} settled"
+            except Exception:
+                skipped += 1
+        msg = f"Auto-settlement: {settled} settled"
         if skipped: msg += f", {skipped} skipped"
         return msg
-    except Exception: return None
+    except Exception:
+        return None
 
 @st.cache_data(ttl=60)
 def fetch_kalshi_lines():
@@ -1084,7 +1132,7 @@ def fetch_kalshi_lines():
                 "ticker": row.get("ticker", ""),
             }
         if not result:
-            return {"**error**": f"No lines for {today} — trigger Edge Function"}
+            return {"**error**": f"No lines for {today} - trigger Edge Function"}
         return result
     except Exception as e:
         return {"**error**": str(e)}
@@ -1115,7 +1163,8 @@ def fetch_odds_lines():
                 m = sorted(totals, key=lambda x: x["total"])[len(totals) // 2]
                 result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
         return result
-    except Exception: return {}
+    except Exception:
+        return {}
 
 def match_kalshi(away, home, lines, mtype="full"):
     for (ka, kh, kt), data in lines.items():
@@ -1137,11 +1186,11 @@ odds_lines = fetch_odds_lines()
 _kalshi_error = kalshi_lines.pop("**error**", None) if isinstance(kalshi_lines, dict) else None
 full_ct = sum(1 for k in kalshi_lines if k[2] == "full") if kalshi_lines else 0
 f5_ct = sum(1 for k in kalshi_lines if k[2] == "f5") if kalshi_lines else 0
-kalshi_status = (f"✅ Kalshi: {full_ct} full game, {f5_ct} F5 loaded"
-                 if kalshi_lines else f"⚠️ Kalshi: {_kalshi_error or 'unavailable'}")
-odds_status = f"✅ Odds API: {len(odds_lines)} game(s)" if odds_lines else "⚠️ Odds API unavailable"
+kalshi_status = (f"Kalshi: {full_ct} full game, {f5_ct} F5 loaded"
+                 if kalshi_lines else f"Kalshi: {_kalshi_error or 'unavailable'}")
+odds_status = f"Odds API: {len(odds_lines)} game(s)" if odds_lines else "Odds API unavailable"
 
-tab1, tab2, tab3 = st.tabs(["Today's Games", "Settlement Tracker", "📊 Calibration"])
+tab1, tab2, tab3 = st.tabs(["Today's Games", "Settlement Tracker", "Calibration"])
 
 with tab1:
     if _settlement_msg:
@@ -1185,9 +1234,9 @@ with tab1:
                     _fg_default_blocked = (_fg_line == DEFAULT_FG_LINE and not odds_lines)
 
                     def _signal(lean, edge, default_blocked):
-                        if default_blocked: return "⛔ DEFAULT", "⚪"
-                        if lean == "EVEN" or abs(edge) < EDGE_THRESHOLD: return "⚪ NO EDGE", "⚪"
-                        direction = "🟢 OVER" if lean == "OVER" else "🔴 UNDER"
+                        if default_blocked: return "—", ""
+                        if lean == "EVEN" or abs(edge) < EDGE_THRESHOLD: return "—", ""
+                        direction = "OVR" if lean == "OVER" else "UND"
                         if abs(edge) * 100 >= 12: return "🔥", direction
                         if abs(edge) * 100 >= 8: return "💪", direction
                         return "👍", direction
@@ -1196,9 +1245,9 @@ with tab1:
                     _fg_sig, _fg_dir = _signal(_fg_lean, _fg_edge, _fg_default_blocked)
 
                     if _dome:
-                        _cond = "🏟️ Dome"
+                        _cond = "Dome"
                     else:
-                        _pf_icon = "🏔️" if _pf >= 1.04 else "⬆️" if _pf > 1.0 else "➡️" if _pf == 1.0 else "⬇️"
+                        _pf_icon = "Hit+" if _pf >= 1.04 else "Hit" if _pf > 1.0 else "Neu" if _pf == 1.0 else "Pit"
                         _cond = _pf_icon
                         if _wx and not _wx.get("dome"):
                             wspeed = _wx.get("wind_speed_mph", 0)
@@ -1207,21 +1256,20 @@ with tab1:
                             temp = _wx.get("temp_f")
                             if wspeed and wspeed >= 5:
                                 dir_label = wind_direction_label(wdir, _home) or ""
-                                factor = wind_out_factor(wdir, _home)
-                                wind_icon = "🌬️" if abs(factor) > 0.3 else "💨"
-                                _cond += f" | {wind_icon}{dir_label} {int(wspeed)}mph"
+                                _cond += f" | {dir_label} {int(wspeed)}mph"
                             if precip and precip >= 20:
-                                _cond += f" 🌧️{precip}%"
+                                _cond += f" Rain{precip}%"
                             if temp and temp < 50:
-                                _cond += f" 🥶{int(temp)}°"
+                                _cond += f" {int(temp)}F"
 
                     _ap_abbr = abbrev_pitcher(_ap, _f5.get("away_days_rest"))
                     _hp_abbr = abbrev_pitcher(_hp, _f5.get("home_days_rest"))
-                    _f5_edge_pct = f"{'+' if _f5_edge > 0 else ''}{round(_f5_edge*100,1)}%" if not _f5_default_blocked else "—"
-                    _fg_edge_pct = f"{'+' if _fg_edge > 0 else ''}{round(_fg_edge*100,1)}%" if not _fg_default_blocked else "—"
-                    _vegas_str = f"{_odds['total']}" if _odds else "—"
-                    _f5_signal_str = f"{_f5_dir} {_f5_sig}" if _f5_sig not in ["⚪ NO EDGE", "⛔ DEFAULT"] else _f5_sig
-                    _fg_signal_str = f"{_fg_dir} {_fg_sig}" if _fg_sig not in ["⚪ NO EDGE", "⛔ DEFAULT"] else _fg_sig
+                    _f5_edge_pct = f"{'+' if _f5_edge > 0 else ''}{round(_f5_edge*100,1)}%" if not _f5_default_blocked else "-"
+                    _fg_edge_pct = f"{'+' if _fg_edge > 0 else ''}{round(_fg_edge*100,1)}%" if not _fg_default_blocked else "-"
+                    _vegas_str = f"{_odds['total']}" if _odds else "-"
+
+                    _f5_signal_str = "—" if _f5_sig == "—" else f"{_f5_dir} {_f5_sig}"
+                    _fg_signal_str = "—" if _fg_sig == "—" else f"{_fg_dir} {_fg_sig}"
 
                     rows.append({
                         "Time": _et,
@@ -1231,8 +1279,8 @@ with tab1:
                         "Conditions": _cond,
                         "Mkt": "F5",
                         "Model": _f5["total"],
-                        "Line": f"{_f5_line}{'✅' if _k5 else '~'}",
-                        "Vegas": "—",
+                        "Line": f"{_f5_line}{'v' if _k5 else '~'}",
+                        "Vegas": "-",
                         "Edge%": _f5_edge_pct,
                         "Signal": _f5_signal_str,
                     })
@@ -1240,7 +1288,7 @@ with tab1:
                         "Time": "", "Matchup": "", "Away": "", "Home": "",
                         "Conditions": "", "Mkt": "FG",
                         "Model": _fg["total"],
-                        "Line": f"{_fg_line}{'✅' if _kf else '~'}",
+                        "Line": f"{_fg_line}{'v' if _kf else '~'}",
                         "Vegas": _vegas_str,
                         "Edge%": _fg_edge_pct,
                         "Signal": _fg_signal_str,
@@ -1249,7 +1297,7 @@ with tab1:
                     continue
 
             if rows:
-                st.markdown("<div class='section-header'>📋 Today's Slate</div>", unsafe_allow_html=True)
+                st.markdown("<div class='section-header'>Today's Slate</div>", unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
                 with c1:
                     if kalshi_lines: st.success(kalshi_status)
@@ -1258,26 +1306,26 @@ with tab1:
                     if odds_lines: st.success(odds_status)
                     else: st.warning(odds_status)
                 if not odds_lines:
-                    st.error("⛔ Odds API unavailable — default lines in use. No bets will fire.")
+                    st.error("Odds API unavailable - default lines in use. No bets will fire.")
 
-                view_type = st.radio("Table view", ["📱 Mobile", "🖥️ Desktop"],
+                view_type = st.radio("Table view", ["Mobile", "Desktop"],
                                      horizontal=True, label_visibility="collapsed")
                 df_all = pd.DataFrame(rows)
                 col_cfg = {
                     "Time":       st.column_config.TextColumn("Time", width="small"),
-                    "Matchup":    st.column_config.TextColumn("Matchup", width="small"),
+                    "Matchup":    st.column_config.TextColumn("Game", width="small"),
                     "Away":       st.column_config.TextColumn("Away SP", width="small"),
                     "Home":       st.column_config.TextColumn("Home SP", width="small"),
-                    "Conditions": st.column_config.TextColumn("Conditions", width="medium"),
+                    "Conditions": st.column_config.TextColumn("Cond", width="medium"),
                     "Mkt":        st.column_config.TextColumn("Mkt", width="small"),
-                    "Model":      st.column_config.NumberColumn("Model", width="small", format="%.1f"),
+                    "Model":      st.column_config.NumberColumn("Mdl", width="small", format="%.1f"),
                     "Line":       st.column_config.TextColumn("Line", width="small"),
-                    "Vegas":      st.column_config.TextColumn("Vegas", width="small"),
-                    "Edge%":      st.column_config.TextColumn("Edge%", width="small"),
-                    "Signal":     st.column_config.TextColumn("Signal", width="small"),
+                    "Vegas":      st.column_config.TextColumn("Vgs", width="small"),
+                    "Edge%":      st.column_config.TextColumn("Edge", width="small"),
+                    "Signal":     st.column_config.TextColumn("Sig", width="small"),
                 }
-                if view_type == "📱 Mobile":
-                    mobile_cols = ["Time", "Matchup", "Mkt", "Model", "Line", "Edge%", "Signal"]
+                if view_type == "Mobile":
+                    mobile_cols = ["Time", "Matchup", "Mkt", "Model", "Line", "Vegas", "Signal"]
                     st.dataframe(
                         df_all[mobile_cols].style.set_properties(**{'text-align': 'center'}),
                         use_container_width=True, hide_index=True,
@@ -1306,30 +1354,29 @@ with tab1:
                     f5 = calc_f5(away, home, ap, hp, pf, wx, game_id, game_date)
                     fg = calc_fg(away, home, ap, hp, pf, wx, game_id, game_date)
 
-                    with st.expander(f"**{away} @ {home}** — {et}"):
-                        away_src = '🟢' if f5['away_src'] == 'live' else '🟡'
-                        home_src = '🟢' if f5['home_src'] == 'live' else '🟡'
+                    with st.expander(f"**{away} @ {home}** - {et}"):
+                        away_src = 'LIVE' if f5['away_src'] == 'live' else 'FB'
+                        home_src = 'LIVE' if f5['home_src'] == 'live' else 'FB'
                         away_rest_str = f" | Rest: {f5['away_days_rest']}d ({f5['away_rest_adj']:+.2f})" if f5['away_days_rest'] else ""
                         home_rest_str = f" | Rest: {f5['home_days_rest']}d ({f5['home_rest_adj']:+.2f})" if f5['home_days_rest'] else ""
                         away_plat_str = f" | Platoon: {f5['away_platoon']:+.2f}" if f5['away_platoon'] != 0.0 else ""
                         home_plat_str = f" | Platoon: {f5['home_platoon']:+.2f}" if f5['home_platoon'] != 0.0 else ""
                         st.markdown(
-                            f"**Away SP:** {ap} ({f5['away_hand']}HP) | ERA: {f5['away_era']} {away_src}{away_plat_str}{away_rest_str}  \n"
-                            f"**Home SP:** {hp} ({f5['home_hand']}HP) | ERA: {f5['home_era']} {home_src}{home_plat_str}{home_rest_str}"
+                            f"**Away SP:** {ap} ({f5['away_hand']}HP) | ERA: {f5['away_era']} [{away_src}]{away_plat_str}{away_rest_str}  \n"
+                            f"**Home SP:** {hp} ({f5['home_hand']}HP) | ERA: {f5['home_era']} [{home_src}]{home_plat_str}{home_rest_str}"
                         )
                         ump_name = f5.get("ump_name", "")
                         ump_factor = f5.get("ump_factor", 1.0)
                         ump_zone = f5.get("ump_zone", "Average")
                         if ump_name:
-                            zone_icon = "🔼" if ump_zone == "Loose" else "🔽" if ump_zone == "Tight" else "➡️"
-                            st.caption(f"👤 HP Ump: **{ump_name}** | Zone: {zone_icon} {ump_zone} | Factor: {ump_factor:.2f}")
+                            st.caption(f"Ump: {ump_name} | Zone: {ump_zone} | Factor: {ump_factor:.2f}")
                         else:
-                            st.caption("👤 HP Ump: Not yet announced")
+                            st.caption("Ump: Not yet announced")
 
                         if wx is None:
-                            wx_str = "⚠️ Weather unavailable"
+                            wx_str = "Weather unavailable"
                         elif wx.get("dome"):
-                            wx_str = "🏟️ Dome — weather N/A"
+                            wx_str = "Dome - weather N/A"
                         else:
                             temp = wx.get("temp_f")
                             wspeed = wx.get("wind_speed_mph", 0)
@@ -1337,19 +1384,19 @@ with tab1:
                             precip = wx.get("precip_pct", 0)
                             dir_label = wind_direction_label(wdir, home) or wx.get("wind_dir_label", "")
                             w_label = fg.get("wind_label") or f5.get("wind_label") or ""
-                            wx_str = f"🌡️ {temp}°F | 💨 {int(wspeed)}mph {dir_label} {w_label}" if temp else "⚠️ No temp data"
+                            wx_str = f"{temp}F | {int(wspeed)}mph {dir_label} {w_label}" if temp else "No temp data"
                             if precip and precip >= 20:
-                                wx_str += f" | 🌧️ Rain: {precip}%"
+                                wx_str += f" | Rain: {precip}%"
 
                         cA, cB = st.columns(2)
                         with cA:
-                            pf_label = "🏔️ Hitter" if pf >= 1.04 else "⬆️ Slight Hit" if pf > 1.0 else "➡️ Neutral" if pf == 1.0 else "⬇️ Pitcher"
-                            st.metric("🏟️ Park", f"{pf:.2f}", delta=pf_label)
+                            pf_label = "Hitter+" if pf >= 1.04 else "Hitter" if pf > 1.0 else "Neutral" if pf == 1.0 else "Pitcher"
+                            st.metric("Park", f"{pf:.2f}", delta=pf_label)
                         with cB:
                             st.info(wx_str)
 
-                        st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
-                        st.markdown('<div class="section-header">⚾ First 5 Innings</div>', unsafe_allow_html=True)
+                        st.markdown("---")
+                        st.markdown("**First 5 Innings**")
                         cF1, cF2 = st.columns(2)
                         with cF1:
                             st.metric("F5 Model", f5["total"])
@@ -1363,16 +1410,16 @@ with tab1:
                         _f5_line = float(_k5["line"]) if _k5 else DEFAULT_F5_LINE
                         _f5_price = int(_k5["over_price_cents"]) if _k5 else 50
                         if _k5:
-                            st.success(f"✅ Kalshi F5: {_f5_line} | Over: {_f5_price}¢")
+                            st.success(f"Kalshi F5: {_f5_line} | Over: {_f5_price}c")
                         else:
-                            st.caption("F5 Kalshi line not loaded — using default 4.5")
+                            st.caption("F5 Kalshi line not loaded - using default 4.5")
                         f5_line_in = st.number_input("F5 Line", 0.0, 15.0, _f5_line, 0.5, key=f"f5l_{game_id}")
-                        f5_price_in = st.number_input("F5 Over Price (¢)", 1, 99, _f5_price, 1, key=f"f5p_{game_id}")
+                        f5_price_in = st.number_input("F5 Over Price (c)", 1, 99, _f5_price, 1, key=f"f5p_{game_id}")
                         signal_boxes(f5["total"], f5_line_in, f5_price_in, game_id,
                                      "F5", away, home, ap, hp, "f5", today)
 
-                        st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
-                        st.markdown('<div class="section-header">🏟️ Full Game</div>', unsafe_allow_html=True)
+                        st.markdown("---")
+                        st.markdown("**Full Game**")
                         cG1, cG2 = st.columns(2)
                         with cG1:
                             st.metric("FG Model", fg["total"])
@@ -1394,13 +1441,13 @@ with tab1:
                         _fg_price = int(_kf["over_price_cents"]) if _kf else 50
                         _game_odds = match_odds(away, home, odds_lines)
                         if _game_odds:
-                            st.info(f"📊 Vegas: {_game_odds['total']} | Over odds: {_game_odds['over_odds']}")
+                            st.info(f"Vegas: {_game_odds['total']} | Over odds: {_game_odds['over_odds']}")
                         if _kf:
-                            st.success(f"✅ Kalshi FG: {_fg_line} | Over: {_fg_price}¢")
+                            st.success(f"Kalshi FG: {_fg_line} | Over: {_fg_price}c")
                         else:
-                            st.caption("Full game Kalshi line not loaded — using default 8.5")
+                            st.caption("Full game Kalshi line not loaded - using default 8.5")
                         fg_line_in = st.number_input("FG Line", 0.0, 20.0, _fg_line, 0.5, key=f"fgl_{game_id}")
-                        fg_price_in = st.number_input("FG Over Price (¢)", 1, 99, _fg_price, 1, key=f"fgp_{game_id}")
+                        fg_price_in = st.number_input("FG Over Price (c)", 1, 99, _fg_price, 1, key=f"fgp_{game_id}")
                         signal_boxes(fg["total"], fg_line_in, fg_price_in, game_id,
                                      "FG", away, home, ap, hp, "full", today)
 
@@ -1412,7 +1459,7 @@ with tab1:
         st.error(f"Error: {e}")
 
 with tab2:
-    st.markdown('<div class="section-header">📊 Settlement Tracker</div>', unsafe_allow_html=True)
+    st.markdown("**Settlement Tracker**")
     if supabase_connected:
         try:
             data = supabase.table("mlb_settlements").select("*").order("game_date", desc=True).execute()
@@ -1450,22 +1497,22 @@ with tab2:
                         m3.metric("Win %", f"{wp}%")
                         m4.metric("Total P&L", f"${pnl:+.2f}")
                         m5.metric("Unsettled", len(df[df["result"].isna()]))
-                        st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+                        st.markdown("---")
 
-                    base_cols = ["game_date","away_team","home_team","market_type",
-                                 "model_total","kalshi_line","bet_direction","bet_amount"]
+                    base_cols = ["game_date", "away_team", "home_team", "market_type",
+                                 "model_total", "kalshi_line", "bet_direction", "bet_amount"]
                     if view_mode == "Real Kalshi Bets Only":
                         base_cols.append("real_amount")
-                        if all(c in df.columns for c in ["real_amount","profit_loss","bet_amount"]):
+                        if all(c in df.columns for c in ["real_amount", "profit_loss", "bet_amount"]):
                             df = df.copy()
                             def calc_real_pnl(row):
                                 real = row.get("real_amount") or row.get("bet_amount") or 0
                                 model = row.get("bet_amount") or 25
                                 pnl = row.get("profit_loss") or 0
                                 return round(pnl * (real / model), 2) if model > 0 else pnl
-                            df["real_P&L"] = df.apply(calc_real_pnl, axis=1)
-                            base_cols.append("real_P&L")
-                    base_cols += ["actual_total","result","profit_loss","settled_at"]
+                            df["real_PL"] = df.apply(calc_real_pnl, axis=1)
+                            base_cols.append("real_PL")
+                    base_cols += ["actual_total", "result", "profit_loss", "settled_at"]
                     display_cols = [c for c in base_cols if c in df.columns]
 
                     def highlight_result(row):
@@ -1483,7 +1530,7 @@ with tab2:
         st.warning("Supabase not connected.")
 
 with tab3:
-    st.markdown('<div class="section-header">📊 Model Calibration Analysis</div>', unsafe_allow_html=True)
+    st.markdown("**Model Calibration Analysis**")
     if supabase_connected:
         try:
             data = supabase.table("mlb_settlements").select("*").execute()
@@ -1493,7 +1540,6 @@ with tab3:
                 if len(settled) < 5:
                     st.info("Need at least 5 settled bets for calibration analysis.")
                 else:
-                    st.markdown('<div class="section-header">Overall Performance</div>', unsafe_allow_html=True)
                     wins = (settled["result"] == "WIN").sum()
                     losses = (settled["result"] == "LOSS").sum()
                     total = wins + losses
@@ -1504,19 +1550,16 @@ with tab3:
                         c1, c2, c3, c4 = st.columns(4)
                         c1.metric("Actual Win Rate", f"{actual_win_rate}%")
                         c2.metric("Avg Model Prob", f"{avg_model_prob}%")
-                        c3.metric("Calibration Gap", f"{calibration_gap:+.1f}%",
-                                  delta="Underconfident ✅" if calibration_gap > 2
-                                  else "Overconfident ⚠️" if calibration_gap < -2
-                                  else "Well calibrated ✅")
+                        c3.metric("Calibration Gap", f"{calibration_gap:+.1f}%")
                         c4.metric("Total Settled", total)
                     else:
                         c1, c2 = st.columns(2)
                         c1.metric("Actual Win Rate", f"{actual_win_rate}%")
                         c2.metric("Total Settled", total)
-                    st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+                    st.markdown("---")
 
-                    st.markdown('<div class="section-header">Performance by Edge %</div>', unsafe_allow_html=True)
                     if "edge" in settled.columns:
+                        st.markdown("**Performance by Edge %**")
                         settled["edge_tier"] = pd.cut(
                             settled["edge"] * 100, bins=[0, 5, 8, 12, 100],
                             labels=["LEAN (5-8%)", "STRONG (8-12%)", "HIGH (12%+)", "UNKNOWN"])
@@ -1528,10 +1571,10 @@ with tab3:
                             })
                         ).reset_index()
                         st.dataframe(tier_stats, use_container_width=True, hide_index=True)
-                    st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+                    st.markdown("---")
 
-                    st.markdown('<div class="section-header">F5 vs Full Game</div>', unsafe_allow_html=True)
                     if "market_type" in settled.columns:
+                        st.markdown("**F5 vs Full Game**")
                         for mtype in ["f5", "full"]:
                             subset = settled[settled["market_type"] == mtype]
                             if len(subset) > 0:
@@ -1540,10 +1583,10 @@ with tab3:
                                 wr = round(w/(w+l)*100, 1) if (w+l) > 0 else 0
                                 label = "First 5 Innings" if mtype == "f5" else "Full Game"
                                 st.markdown(f"**{label}:** {w}W-{l}L ({wr}% win rate)")
-                    st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+                    st.markdown("---")
 
-                    st.markdown('<div class="section-header">OVER vs UNDER</div>', unsafe_allow_html=True)
                     if "bet_direction" in settled.columns:
+                        st.markdown("**OVER vs UNDER**")
                         for direction in ["OVER", "UNDER"]:
                             subset = settled[settled["bet_direction"] == direction]
                             if len(subset) > 0:
@@ -1551,19 +1594,19 @@ with tab3:
                                 l = (subset["result"] == "LOSS").sum()
                                 wr = round(w/(w+l)*100, 1) if (w+l) > 0 else 0
                                 st.markdown(f"**{direction}:** {w}W-{l}L ({wr}% win rate)")
-                    st.markdown('<hr class="mph-divider">', unsafe_allow_html=True)
+                    st.markdown("---")
 
-                    st.markdown('<div class="section-header">Kelly Sizing</div>', unsafe_allow_html=True)
+                    st.markdown("**Kelly Sizing**")
                     if actual_win_rate > 60:
-                        st.success(f"✅ {actual_win_rate}% win rate — consider increasing allocation slightly")
+                        st.success(f"{actual_win_rate}% win rate - consider increasing allocation slightly")
                     elif actual_win_rate > 55:
-                        st.info(f"📊 {actual_win_rate}% — solid, maintain Half Kelly")
+                        st.info(f"{actual_win_rate}% - solid, maintain Half Kelly")
                     elif actual_win_rate > 50:
-                        st.warning(f"⚠️ {actual_win_rate}% — marginal, don't increase sizing yet")
+                        st.warning(f"{actual_win_rate}% - marginal, do not increase sizing yet")
                     else:
-                        st.error(f"❌ {actual_win_rate}% — below 50%, review model inputs")
+                        st.error(f"{actual_win_rate}% - below 50%, review model inputs")
                     if len(settled) < 30:
-                        st.caption(f"⚠️ Only {len(settled)} settled bets — need 30+ for meaningful calibration")
+                        st.caption(f"Only {len(settled)} settled bets - need 30+ for meaningful calibration")
             else:
                 st.info("No settled bets yet.")
         except Exception as e:
