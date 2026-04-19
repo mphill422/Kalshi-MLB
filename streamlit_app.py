@@ -1204,6 +1204,8 @@ with tab1:
             rows = []
             for g in schedule:
                 try:
+                    if g.get('game_type', 'R') not in ('R', 'F', 'D', 'L', 'W'):
+                        continue
                     _home, _away = g['home_name'], g['away_name']
                     _hp = g.get('home_probable_pitcher', 'TBD')
                     _ap = g.get('away_probable_pitcher', 'TBD')
@@ -1280,7 +1282,7 @@ with tab1:
                         "Mkt": "F5",
                         "Model": _f5["total"],
                         "Line": f"{_f5_line}{'v' if _k5 else '~'}",
-                        "Vegas": "-",
+                        "Vegas": _vegas_str,
                         "Edge%": _f5_edge_pct,
                         "Signal": _f5_signal_str,
                     })
@@ -1325,7 +1327,7 @@ with tab1:
                     "Signal":     st.column_config.TextColumn("Sig", width="small"),
                 }
                 if view_type == "Mobile":
-                    mobile_cols = ["Time", "Matchup", "Mkt", "Model", "Line", "Vegas", "Signal"]
+                    mobile_cols = ["Time", "Matchup", "Mkt", "Model", "Line", "Vegas", "Edge%", "Signal"]
                     st.dataframe(
                         df_all[mobile_cols].style.set_properties(**{'text-align': 'center'}),
                         use_container_width=True, hide_index=True,
