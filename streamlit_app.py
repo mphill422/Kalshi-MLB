@@ -1139,32 +1139,42 @@ def fetch_kalshi_lines():
 
 @st.cache_data(ttl=300)
 def fetch_odds_lines():
+    """Fetches FG totals and F5 totals in one cached call. Returns (fg_lines, f5_lines)."""
     try:
         api_key = get_secret("ODDS_API_KEY")
-        if not api_key: return {}
+        if not api_key: return {}, {}
+        # Single batched request for both markets
         resp = requests.get("https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/",
-            params={"apiKey": api_key, "regions": "us", "markets": "totals",
+            params={"apiKey": api_key, "regions": "us",
+                    "markets": "totals,h2h_h1",
                     "oddsFormat": "american", "dateFormat": "iso"}, timeout=10)
-        if resp.status_code != 200: return {}
+        if resp.status_code != 200: return {}, {}
         data = resp.json()
-        if not isinstance(data, list): return {}
-        result = {}
+        if not isinstance(data, list): return {}, {}
+        fg_result, f5_result = {}, {}
         for game in data:
             away = game.get("away_team", "").lower()
             home = game.get("home_team", "").lower()
-            totals = []
+            fg_totals, f5_totals = [], []
             for bm in game.get("bookmakers", []):
                 for mkt in bm.get("markets", []):
-                    if mkt.get("key") != "totals": continue
+                    key = mkt.get("key", "")
                     for oc in mkt.get("outcomes", []):
                         if oc.get("name") == "Over":
-                            totals.append({"total": oc.get("point"), "odds": oc.get("price")})
-            if totals:
-                m = sorted(totals, key=lambda x: x["total"])[len(totals) // 2]
-                result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
-        return result
+                            entry = {"total": oc.get("point"), "odds": oc.get("price")}
+                            if key == "totals":
+                                fg_totals.append(entry)
+                            elif key in ("h2h_h1", "first_five_innings_totals", "alternate_totals"):
+                                f5_totals.append(entry)
+            if fg_totals:
+                m = sorted(fg_totals, key=lambda x: x["total"])[len(fg_totals) // 2]
+                fg_result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
+            if f5_totals:
+                m = sorted(f5_totals, key=lambda x: x["total"])[len(f5_totals) // 2]
+                f5_result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
+        return fg_result, f5_result
     except Exception:
-        return {}
+        return {}, {}
 
 def match_kalshi(away, home, lines, mtype="full"):
     for (ka, kh, kt), data in lines.items():
@@ -1181,14 +1191,14 @@ def match_odds(away, home, lines):
 
 _settlement_msg = run_auto_settlement()
 kalshi_lines = fetch_kalshi_lines()
-odds_lines = fetch_odds_lines()
+odds_lines, odds_f5_lines = fetch_odds_lines()
 
 _kalshi_error = kalshi_lines.pop("**error**", None) if isinstance(kalshi_lines, dict) else None
 full_ct = sum(1 for k in kalshi_lines if k[2] == "full") if kalshi_lines else 0
 f5_ct = sum(1 for k in kalshi_lines if k[2] == "f5") if kalshi_lines else 0
 kalshi_status = (f"Kalshi: {full_ct} full game, {f5_ct} F5 loaded"
                  if kalshi_lines else f"Kalshi: {_kalshi_error or 'unavailable'}")
-odds_status = f"Odds API: {len(odds_lines)} game(s)" if odds_lines else "Odds API unavailable"
+odds_status = f"Odds API: {len(odds_lines)} FG, {len(odds_f5_lines)} F5" if odds_lines else "Odds API unavailable"
 
 tab1, tab2, tab3 = st.tabs(["Today's Games", "Settlement Tracker", "Calibration"])
 
@@ -1269,6 +1279,8 @@ with tab1:
                     _f5_edge_pct = f"{'+' if _f5_edge > 0 else ''}{round(_f5_edge*100,1)}%" if not _f5_default_blocked else "-"
                     _fg_edge_pct = f"{'+' if _fg_edge > 0 else ''}{round(_fg_edge*100,1)}%" if not _fg_default_blocked else "-"
                     _vegas_str = f"{_odds['total']}" if _odds else "-"
+                    _odds_f5 = match_odds(_away, _home, odds_f5_lines)
+                    _vegas_f5_str = f"{_odds_f5['total']}" if _odds_f5 else "-"
 
                     _f5_signal_str = "—" if _f5_sig == "—" else f"{_f5_dir} {_f5_sig}"
                     _fg_signal_str = "—" if _fg_sig == "—" else f"{_fg_dir} {_fg_sig}"
@@ -1282,7 +1294,7 @@ with tab1:
                         "Mkt": "F5",
                         "Model": _f5["total"],
                         "Line": f"{_f5_line}{'v' if _k5 else '~'}",
-                        "Vegas": _vegas_str,
+                        "Vegas": _vegas_f5_str,
                         "Edge%": _f5_edge_pct,
                         "Signal": _f5_signal_str,
                     })
