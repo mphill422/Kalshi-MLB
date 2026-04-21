@@ -1139,32 +1139,20 @@ def fetch_kalshi_lines():
 
 @st.cache_data(ttl=300)
 def fetch_odds_lines():
-    """
-    Step 1: Bulk call for FG totals + event IDs (1 credit).
-    Step 2: Per-event call for F5 totals using event IDs (1 credit each).
-    All cached together at ttl=300 so one page load = one set of calls per 5 min.
-    Returns (fg_lines, f5_lines).
-    """
+    """Fetches FG totals only. F5 Vegas not yet supported. Returns (fg_lines, {})."""
     try:
         api_key = get_secret("ODDS_API_KEY")
         if not api_key: return {}, {}
-
-        # --- Step 1: FG totals + collect event IDs ---
         resp = requests.get("https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/",
             params={"apiKey": api_key, "regions": "us", "markets": "totals",
                     "oddsFormat": "american", "dateFormat": "iso"}, timeout=10)
         if resp.status_code != 200: return {}, {}
         data = resp.json()
         if not isinstance(data, list): return {}, {}
-
         fg_result = {}
-        event_ids = {}  # (away, home) -> event_id
         for game in data:
             away = game.get("away_team", "").lower()
             home = game.get("home_team", "").lower()
-            event_id = game.get("id", "")
-            if event_id:
-                event_ids[(away, home)] = event_id
             fg_totals = []
             for bm in game.get("bookmakers", []):
                 for mkt in bm.get("markets", []):
@@ -1175,33 +1163,7 @@ def fetch_odds_lines():
             if fg_totals:
                 m = sorted(fg_totals, key=lambda x: x["total"])[len(fg_totals) // 2]
                 fg_result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
-
-        # --- Step 2: F5 totals per event ---
-        f5_result = {}
-        for (away, home), event_id in event_ids.items():
-            try:
-                f5_resp = requests.get(
-                    f"https://api.the-odds-api.com/v4/sports/baseball_mlb/events/{event_id}/odds",
-                    params={"apiKey": api_key, "regions": "us",
-                            "markets": "totals",
-                            "oddsFormat": "american", "dateFormat": "iso",
-                            "periods": "1"}, timeout=8)
-                if f5_resp.status_code != 200: continue
-                f5_data = f5_resp.json()
-                f5_totals = []
-                for bm in f5_data.get("bookmakers", []):
-                    for mkt in bm.get("markets", []):
-                        if mkt.get("key") != "totals": continue
-                        for oc in mkt.get("outcomes", []):
-                            if oc.get("name") == "Over":
-                                f5_totals.append({"total": oc.get("point"), "odds": oc.get("price")})
-                if f5_totals:
-                    m = sorted(f5_totals, key=lambda x: x["total"])[len(f5_totals) // 2]
-                    f5_result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
-            except Exception:
-                continue
-
-        return fg_result, f5_result
+        return fg_result, {}
     except Exception:
         return {}, {}
 
@@ -1227,7 +1189,7 @@ full_ct = sum(1 for k in kalshi_lines if k[2] == "full") if kalshi_lines else 0
 f5_ct = sum(1 for k in kalshi_lines if k[2] == "f5") if kalshi_lines else 0
 kalshi_status = (f"Kalshi: {full_ct} full game, {f5_ct} F5 loaded"
                  if kalshi_lines else f"Kalshi: {_kalshi_error or 'unavailable'}")
-odds_status = f"Odds API: {len(odds_lines)} FG, {len(odds_f5_lines)} F5" if odds_lines else "Odds API unavailable"
+odds_status = f"Odds API: {len(odds_lines)} FG" if odds_lines else "Odds API unavailable"
 
 tab1, tab2, tab3 = st.tabs(["Today's Games", "Settlement Tracker", "Calibration"])
 
@@ -1308,8 +1270,7 @@ with tab1:
                     _f5_edge_pct = f"{'+' if _f5_edge > 0 else ''}{round(_f5_edge*100,1)}%" if not _f5_default_blocked else "-"
                     _fg_edge_pct = f"{'+' if _fg_edge > 0 else ''}{round(_fg_edge*100,1)}%" if not _fg_default_blocked else "-"
                     _vegas_str = f"{_odds['total']}" if _odds else "-"
-                    _odds_f5 = match_odds(_away, _home, odds_f5_lines)
-                    _vegas_f5_str = f"{_odds_f5['total']}" if _odds_f5 else "-"
+                    _vegas_f5_str = "-"
 
                     _f5_signal_str = "—" if _f5_sig == "—" else f"{_f5_dir} {_f5_sig}"
                     _fg_signal_str = "—" if _fg_sig == "—" else f"{_fg_dir} {_fg_sig}"
