@@ -19,61 +19,132 @@ st.set_page_config(page_title="MPH MLB Model", layout="wide", page_icon="⚾")
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
-html, body, .stApp { background-color: #080c14 !important; font-family: 'Inter', sans-serif !important; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+/* ── Base ── */
+html, body, .stApp { background-color: #05080f !important; font-family: 'Inter', sans-serif !important; }
+
+/* ── Header ── */
 .mph-header {
-    background: linear-gradient(135deg, #0d1f3c 0%, #0a1628 100%);
-    border-bottom: 2px solid #1e90ff33; padding: 18px 24px 14px 24px;
-    margin: -1rem -1rem 1.5rem -1rem; display: flex; align-items: center; justify-content: space-between;
+    background: linear-gradient(135deg, #0a1628 0%, #0d1f3c 50%, #071020 100%);
+    border-bottom: 1px solid #1e90ff44;
+    padding: 16px 24px 14px 24px;
+    margin: -1rem -1rem 1.5rem -1rem;
+    display: flex; align-items: center; justify-content: space-between;
+    box-shadow: 0 4px 24px #1e90ff11;
 }
-.mph-title { font-size: 1.6rem; font-weight: 800; letter-spacing: -0.5px; color: #ffffff; }
-.mph-title span { color: #1e90ff; }
+.mph-title { font-size: 1.5rem; font-weight: 900; letter-spacing: -1px; color: #ffffff; }
+.mph-title span { color: #3b9eff; }
 .mph-badge {
-    background: #1e90ff18; border: 1px solid #1e90ff44; color: #1e90ff;
-    font-size: 0.7rem; font-weight: 700; padding: 3px 10px; border-radius: 20px;
-    letter-spacing: 1px; text-transform: uppercase;
+    background: linear-gradient(135deg, #1e90ff22, #7c3aed22);
+    border: 1px solid #3b9eff55; color: #3b9eff;
+    font-size: 0.65rem; font-weight: 800; padding: 3px 10px; border-radius: 20px;
+    letter-spacing: 2px; text-transform: uppercase;
 }
-.mph-sub { color: #4a6080; font-size: 0.8rem; margin-top: 2px; }
-.section-header {
-    font-size: 0.7rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
-    color: #1e90ff; border-bottom: 1px solid #1e90ff22; padding-bottom: 6px; margin: 1.2rem 0 0.8rem 0;
-}
-div[data-testid="metric-container"] {
-    background: #0d1a2d !important; border: 1px solid #1e3a5f !important;
-    border-radius: 8px !important; padding: 10px 14px !important; transition: border-color 0.2s;
-}
-div[data-testid="metric-container"]:hover { border-color: #1e90ff66 !important; }
-div[data-testid="metric-container"] label { color: #4a6080 !important; font-size: 0.7rem !important; text-transform: uppercase; letter-spacing: 1px; }
-div[data-testid="metric-container"] div[data-testid="stMetricValue"] { color: #e8f0fe !important; font-size: 1.4rem !important; font-weight: 700 !important; }
-details { background: #0d1a2d !important; border: 1px solid #1e3a5f !important; border-radius: 8px !important; margin-bottom: 6px !important; transition: border-color 0.2s; }
-details:hover { border-color: #1e90ff55 !important; }
-details summary { font-weight: 600 !important; color: #c8d8f0 !important; padding: 10px 14px !important; }
-details[open] { border-color: #1e90ff55 !important; }
-.mph-divider { border: none; border-top: 1px solid #1e3a5f; margin: 1rem 0; }
-.stButton > button {
-    background: #0d1a2d !important; border: 1px solid #1e90ff55 !important; color: #1e90ff !important;
-    border-radius: 6px !important; font-weight: 600 !important; font-size: 0.85rem !important;
-    width: 100% !important; transition: all 0.2s !important;
-}
-.stButton > button:hover { background: #1e90ff15 !important; border-color: #1e90ff !important; }
+.mph-sub { color: #3a5070; font-size: 0.75rem; margin-top: 3px; }
+
+/* ── Live pill ── */
 .pill-live {
-    display: inline-block; background: #00cc8822; border: 1px solid #00cc8866;
-    color: #00cc88; font-size: 0.65rem; font-weight: 700; padding: 2px 8px;
-    border-radius: 20px; letter-spacing: 1px; text-transform: uppercase; margin-left: 8px;
+    display: inline-block; background: #00ff8811; border: 1px solid #00ff8844;
+    color: #00ff88; font-size: 0.6rem; font-weight: 800; padding: 2px 8px;
+    border-radius: 20px; letter-spacing: 2px; text-transform: uppercase; margin-left: 8px;
+    animation: pulse 2s infinite;
 }
-div[data-testid="stAlert"] { border-radius: 6px !important; font-size: 0.85rem !important; }
-.stDataFrame { border-radius: 8px !important; border: 1px solid #1e3a5f !important; overflow: hidden !important; }
-section[data-testid="stSidebar"] { background: #080c14 !important; border-right: 1px solid #1e3a5f !important; }
-section[data-testid="stSidebar"] .stMarkdown { font-size: 0.85rem !important; }
-.stTabs [data-baseweb="tab-list"] { background: #0d1a2d !important; border-radius: 8px !important; padding: 4px !important; gap: 4px !important; }
-.stTabs [data-baseweb="tab"] { color: #4a6080 !important; font-weight: 600 !important; border-radius: 6px !important; }
-.stTabs [aria-selected="true"] { background: #1e90ff22 !important; color: #1e90ff !important; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+/* ── Section headers ── */
+.section-header {
+    font-size: 0.65rem; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
+    color: #3b9eff; border-bottom: 1px solid #1e90ff22;
+    padding-bottom: 6px; margin: 1.5rem 0 1rem 0;
+}
+
+/* ── Metrics ── */
+div[data-testid="metric-container"] {
+    background: linear-gradient(135deg, #0d1a2d, #0a1422) !important;
+    border: 1px solid #1e3a5f !important; border-radius: 10px !important;
+    padding: 12px 16px !important; transition: all 0.2s;
+    box-shadow: 0 2px 12px #00000044;
+}
+div[data-testid="metric-container"]:hover {
+    border-color: #3b9eff66 !important; box-shadow: 0 4px 20px #1e90ff11 !important;
+    transform: translateY(-1px);
+}
+div[data-testid="metric-container"] label {
+    color: #3a5070 !important; font-size: 0.65rem !important;
+    text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600 !important;
+}
+div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+    color: #e8f4ff !important; font-size: 1.4rem !important; font-weight: 800 !important;
+}
+
+/* ── Expanders ── */
+details {
+    background: linear-gradient(135deg, #0d1a2d, #0a1422) !important;
+    border: 1px solid #1a3050 !important; border-radius: 10px !important;
+    margin-bottom: 8px !important; transition: all 0.2s;
+    box-shadow: 0 2px 12px #00000033;
+}
+details:hover { border-color: #3b9eff44 !important; }
+details summary { font-weight: 700 !important; color: #c8d8f0 !important; padding: 12px 16px !important; }
+details[open] { border-color: #3b9eff55 !important; box-shadow: 0 4px 20px #1e90ff0a !important; }
+
+/* ── Divider ── */
+.mph-divider { border: none; border-top: 1px solid #1a3050; margin: 1rem 0; }
+
+/* ── Buttons ── */
+.stButton > button {
+    background: linear-gradient(135deg, #0d1a2d, #0a1422) !important;
+    border: 1px solid #3b9eff44 !important; color: #3b9eff !important;
+    border-radius: 8px !important; font-weight: 700 !important; font-size: 0.82rem !important;
+    width: 100% !important; transition: all 0.2s !important; letter-spacing: 0.5px;
+}
+.stButton > button:hover {
+    background: linear-gradient(135deg, #1e90ff18, #7c3aed11) !important;
+    border-color: #3b9eff !important; box-shadow: 0 4px 16px #1e90ff22 !important;
+}
+
+/* ── Alerts ── */
+div[data-testid="stAlert"] { border-radius: 8px !important; font-size: 0.82rem !important; }
+
+/* ── DataFrame ── */
+.stDataFrame {
+    border-radius: 10px !important; border: 1px solid #1a3050 !important;
+    overflow: hidden !important; box-shadow: 0 4px 24px #00000044 !important;
+}
+
+/* ── Sidebar ── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #080c18, #05080f) !important;
+    border-right: 1px solid #1a3050 !important;
+}
+section[data-testid="stSidebar"] .stMarkdown { font-size: 0.82rem !important; }
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: #0d1a2d !important; border-radius: 10px !important;
+    padding: 4px !important; gap: 4px !important; border: 1px solid #1a3050 !important;
+}
+.stTabs [data-baseweb="tab"] {
+    color: #3a5070 !important; font-weight: 700 !important;
+    border-radius: 8px !important; font-size: 0.82rem !important; letter-spacing: 0.5px;
+}
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, #1e90ff22, #7c3aed22) !important;
+    color: #3b9eff !important; border: 1px solid #3b9eff33 !important;
+}
+
+/* ── Signal color badges in dataframe ── */
+.over-high { color: #00ff88 !important; font-weight: 800 !important; }
+.under-high { color: #ff4466 !important; font-weight: 800 !important; }
+
+/* ── Mobile ── */
 @media (max-width: 768px) {
-    .mph-title { font-size: 1.2rem !important; }
+    .mph-title { font-size: 1.1rem !important; }
     div[data-testid="metric-container"] { padding: 8px 10px !important; }
     div[data-testid="metric-container"] div[data-testid="stMetricValue"] { font-size: 1.1rem !important; }
-    .stDataFrame { font-size: 0.72rem !important; }
-    details summary { font-size: 0.85rem !important; padding: 8px 12px !important; }
+    .stDataFrame { font-size: 0.7rem !important; }
+    details summary { font-size: 0.82rem !important; padding: 10px 14px !important; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -82,13 +153,13 @@ st.markdown(f"""
 <div class="mph-header">
   <div>
     <div class="mph-title">⚾ MPH <span>MLB</span> Model</div>
-    <div class="mph-sub">Run Totals · First 5 Innings · Full Game &nbsp;
-      <span class="pill-live">● LIVE</span>
+    <div class="mph-sub">Run Totals &middot; First 5 Innings &middot; Full Game &nbsp;
+      <span class="pill-live">&#9679; LIVE</span>
     </div>
   </div>
   <div style="text-align:right">
-    <div class="mph-badge">V4.37</div>
-    <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y')}</div>
+    <div class="mph-badge">V4.40</div>
+    <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y &middot; %-I:%M %p ET')}</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -1139,20 +1210,31 @@ def fetch_kalshi_lines():
 
 @st.cache_data(ttl=300)
 def fetch_odds_lines():
-    """Fetches FG totals only. F5 Vegas not yet supported. Returns (fg_lines, {})."""
+    """
+    Step 1: Bulk call for FG totals + event IDs (1 credit).
+    Step 2: Per-event call for F5 totals using confirmed market key totals_1st_5_innings.
+    Cached together at ttl=300. Returns (fg_lines, f5_lines).
+    """
     try:
         api_key = get_secret("ODDS_API_KEY")
         if not api_key: return {}, {}
+
+        # Step 1: FG totals + collect event IDs
         resp = requests.get("https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/",
             params={"apiKey": api_key, "regions": "us", "markets": "totals",
                     "oddsFormat": "american", "dateFormat": "iso"}, timeout=10)
         if resp.status_code != 200: return {}, {}
         data = resp.json()
         if not isinstance(data, list): return {}, {}
+
         fg_result = {}
+        event_ids = {}
         for game in data:
             away = game.get("away_team", "").lower()
             home = game.get("home_team", "").lower()
+            event_id = game.get("id", "")
+            if event_id:
+                event_ids[(away, home)] = event_id
             fg_totals = []
             for bm in game.get("bookmakers", []):
                 for mkt in bm.get("markets", []):
@@ -1163,7 +1245,35 @@ def fetch_odds_lines():
             if fg_totals:
                 m = sorted(fg_totals, key=lambda x: x["total"])[len(fg_totals) // 2]
                 fg_result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
-        return fg_result, {}
+
+        # Step 2: F5 totals per event using confirmed market key
+        f5_result = {}
+        for (away, home), event_id in event_ids.items():
+            try:
+                f5_resp = requests.get(
+                    f"https://api.the-odds-api.com/v4/sports/baseball_mlb/events/{event_id}/odds",
+                    params={"apiKey": api_key, "regions": "us",
+                            "markets": "totals_1st_5_innings",
+                            "oddsFormat": "american", "dateFormat": "iso"}, timeout=8)
+                if f5_resp.status_code != 200: continue
+                f5_data = f5_resp.json()
+                f5_totals = []
+                for bm in f5_data.get("bookmakers", []):
+                    for mkt in bm.get("markets", []):
+                        if mkt.get("key") != "totals_1st_5_innings": continue
+                        for oc in mkt.get("outcomes", []):
+                            if oc.get("name") == "Over":
+                                point = oc.get("point")
+                                # Sanity check: F5 totals must be between 3.0 and 7.0
+                                if point and 3.0 <= float(point) <= 7.0:
+                                    f5_totals.append({"total": point, "odds": oc.get("price")})
+                if f5_totals:
+                    m = sorted(f5_totals, key=lambda x: x["total"])[len(f5_totals) // 2]
+                    f5_result[(away, home)] = {"total": m["total"], "over_odds": m["odds"]}
+            except Exception:
+                continue
+
+        return fg_result, f5_result
     except Exception:
         return {}, {}
 
@@ -1189,7 +1299,7 @@ full_ct = sum(1 for k in kalshi_lines if k[2] == "full") if kalshi_lines else 0
 f5_ct = sum(1 for k in kalshi_lines if k[2] == "f5") if kalshi_lines else 0
 kalshi_status = (f"Kalshi: {full_ct} full game, {f5_ct} F5 loaded"
                  if kalshi_lines else f"Kalshi: {_kalshi_error or 'unavailable'}")
-odds_status = f"Odds API: {len(odds_lines)} FG" if odds_lines else "Odds API unavailable"
+odds_status = f"Odds API: {len(odds_lines)} FG, {len(odds_f5_lines)} F5" if odds_lines else "Odds API unavailable"
 
 tab1, tab2, tab3 = st.tabs(["Today's Games", "Settlement Tracker", "Calibration"])
 
@@ -1239,9 +1349,9 @@ with tab1:
                     def _signal(lean, edge, default_blocked):
                         if default_blocked: return "—", ""
                         if lean == "EVEN" or abs(edge) < EDGE_THRESHOLD: return "—", ""
-                        direction = "OVR" if lean == "OVER" else "UND"
-                        if abs(edge) * 100 >= 12: return "🔥", direction
-                        if abs(edge) * 100 >= 8: return "💪", direction
+                        direction = "🟢 OVR" if lean == "OVER" else "🔴 UND"
+                        if abs(edge) * 100 >= 12: return "🔥 HOT", direction
+                        if abs(edge) * 100 >= 8: return "⚡ EDGE", direction
                         return "👍", direction
 
                     _f5_sig, _f5_dir = _signal(_f5_lean, _f5_edge, _f5_default_blocked)
@@ -1270,7 +1380,8 @@ with tab1:
                     _f5_edge_pct = f"{'+' if _f5_edge > 0 else ''}{round(_f5_edge*100,1)}%" if not _f5_default_blocked else "-"
                     _fg_edge_pct = f"{'+' if _fg_edge > 0 else ''}{round(_fg_edge*100,1)}%" if not _fg_default_blocked else "-"
                     _vegas_str = f"{_odds['total']}" if _odds else "-"
-                    _vegas_f5_str = "-"
+                    _odds_f5 = match_odds(_away, _home, odds_f5_lines)
+                    _vegas_f5_str = f"{_odds_f5['total']}" if _odds_f5 else "-"
 
                     _f5_signal_str = "—" if _f5_sig == "—" else f"{_f5_dir} {_f5_sig}"
                     _fg_signal_str = "—" if _fg_sig == "—" else f"{_fg_dir} {_fg_sig}"
