@@ -919,7 +919,7 @@ def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, g
 def poisson_over_prob(lam, line):
     k_max = int(line)
     cdf = sum((math.exp(-lam) * (lam ** k)) / math.factorial(k) for k in range(k_max + 1))
-    return max(0.10, min(0.90, 1.0 - cdf))
+    return max(0.25, min(0.75, 1.0 - cdf))
 
 @st.cache_data(ttl=300)
 def monte_carlo_prob(model_total, line, era_uncertainty=0.40, rpg_uncertainty=0.25, n_sims=5000):
@@ -933,12 +933,12 @@ def monte_carlo_prob(model_total, line, era_uncertainty=0.40, rpg_uncertainty=0.
 
 def model_to_prob(model_total, line):
     p_final = 0.60 * monte_carlo_prob(model_total, line) + 0.40 * poisson_over_prob(model_total, line)
-    return int(round(max(15, min(85, p_final * 100))))
+    return int(round(max(25, min(75, p_final * 100))))
 
 def model_to_prob_detail(model_total, line):
     p_poisson = poisson_over_prob(model_total, line)
     p_mc = monte_carlo_prob(model_total, line)
-    p_final = max(0.15, min(0.85, 0.60 * p_mc + 0.40 * p_poisson))
+    p_final = max(0.25, min(0.75, 0.60 * p_mc + 0.40 * p_poisson))
     return {
         "poisson": round(p_poisson * 100, 1),
         "monte_carlo": round(p_mc * 100, 1),
