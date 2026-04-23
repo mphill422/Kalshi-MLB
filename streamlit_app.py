@@ -302,6 +302,10 @@ TEAM_HOME_AWAY_SPLITS = {
     "San Francisco Giants":  (4.3, 3.9),
 }
 
+# Initialized here so get_team_home/away_rpg can reference them before fetch runs
+_live_home_rpg = {}
+_live_away_rpg = {}
+
 def get_team_home_rpg(team_name):
     # Live 2026 splits first
     for key in _live_home_rpg:
