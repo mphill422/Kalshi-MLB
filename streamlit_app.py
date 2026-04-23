@@ -17,6 +17,63 @@ def now_et():
 
 st.set_page_config(page_title="MPH MLB Model", layout="wide", page_icon="⚾")
 
+# ══════════════════════════════════════════════════════════════════════════════
+# APP PASSWORD GATE
+# ══════════════════════════════════════════════════════════════════════════════
+def _check_app_password():
+    try:
+        correct_pw = st.secrets.get('app_password', None)
+    except Exception:
+        correct_pw = None
+    if not correct_pw:
+        return True
+    if st.session_state.get('_app_authed') is True:
+        return True
+    st.markdown("""
+    <style>
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    #MainMenu, footer, header {visibility: hidden;}
+    .mph-login-wrap {
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; min-height: 70vh;
+    }
+    .mph-login-title {
+        font-size: 2.4rem; font-weight: 700;
+        background: linear-gradient(135deg, #00ff88 0%, #00d4ff 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 0.25rem;
+    }
+    .mph-login-sub {
+        color: #888; font-size: 0.95rem; margin-bottom: 2rem;
+    }
+    .mph-login-badge {
+        display: inline-block; padding: 0.2rem 0.7rem;
+        background: rgba(0, 255, 136, 0.12);
+        border: 1px solid rgba(0, 255, 136, 0.4);
+        border-radius: 999px; color: #00ff88; font-size: 0.75rem;
+        font-weight: 600; letter-spacing: 0.05em; margin-left: 0.5rem;
+    }
+    </style>
+    <div class="mph-login-wrap">
+      <div class="mph-login-title">⚾ MPH MLB Model <span class="mph-login-badge">Private</span></div>
+      <div class="mph-login-sub">Private — enter access password to continue</div>
+    </div>
+    """, unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        pw = st.text_input('Access password', type='password', key='_app_pw_input',
+                           label_visibility='collapsed', placeholder='Enter password')
+        if pw:
+            if pw == correct_pw:
+                st.session_state['_app_authed'] = True
+                st.rerun()
+            else:
+                st.error('Incorrect password.')
+    st.stop()
+
+_check_app_password()
+
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
