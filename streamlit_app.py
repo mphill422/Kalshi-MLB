@@ -512,7 +512,10 @@ PITCHER_ERA_FALLBACK = {
     "Dylan Cease": 3.38, "Luis Castillo": 3.50, "Kevin Gausman": 3.45,
     "Paul Skenes": 3.50, "Kodai Senga": 3.50, "Cole Ragans": 3.50,
     "Sandy Alcantara": 3.50, "George Kirby": 3.60, "Shane Bieber": 3.60,
-    "Colin Rea": 3.60, "Roki Sasaki": 3.70, "Mitch Keller": 3.91,
+    "Colin Rea": 3.60,
+    "Jacob deGrom": 2.29, "Bubba Chandler": 3.15, "Kumar Rocker": 3.80,
+    "Braxton Ashcraft": 3.90, "Carmen Mlodzinski": 3.50, "Jared Jones": 4.20,
+    "Paul Skenes": 2.80, "Andrew Painter": 3.60, "Mitch Keller": 3.50, "Roki Sasaki": 3.70, "Mitch Keller": 3.91,
     "Jameson Taillon": 3.68, "Michael King": 3.75, "Joe Ryan": 3.85,
     "Zac Gallen": 3.85, "Shane McClanahan": 3.86, "Landen Roupp": 3.80,
     "Clay Holmes": 3.80, "Yu Darvish": 3.80, "Jack Leiter": 3.80,
@@ -581,6 +584,8 @@ PITCHER_HAND = {
     "Aaron Nola": "R", "Merrill Kelly": "R", "Patrick Detmers": "L",
     "Ryan Weathers": "L", "Spencer Springs": "R", "Jake Abel": "R",
     "Colin Rea": "R",
+    "Jacob deGrom": "R", "Bubba Chandler": "R", "Kumar Rocker": "R",
+    "Braxton Ashcraft": "R", "Carmen Mlodzinski": "R",
 }
 
 LINEUP_LHH_PCT = {
