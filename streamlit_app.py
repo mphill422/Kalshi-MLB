@@ -303,12 +303,22 @@ TEAM_HOME_AWAY_SPLITS = {
 }
 
 def get_team_home_rpg(team_name):
+    # Live 2026 splits first
+    for key in _live_home_rpg:
+        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
+            return _live_home_rpg[key]
+    # Fallback to hardcoded splits
     for key in TEAM_HOME_AWAY_SPLITS:
         if key.lower() in team_name.lower() or team_name.lower() in key.lower():
             return TEAM_HOME_AWAY_SPLITS[key][0]
     return get_team_rpg(team_name) + HOME_ADVANTAGE_RUNS
 
 def get_team_away_rpg(team_name):
+    # Live 2026 splits first
+    for key in _live_away_rpg:
+        if key.lower() in team_name.lower() or team_name.lower() in key.lower():
+            return _live_away_rpg[key]
+    # Fallback to hardcoded splits
     for key in TEAM_HOME_AWAY_SPLITS:
         if key.lower() in team_name.lower() or team_name.lower() in key.lower():
             return TEAM_HOME_AWAY_SPLITS[key][1]
@@ -363,47 +373,48 @@ def get_rest_adj(pitcher_name, game_date_str=None):
     except Exception:
         return 0.0, None
 
+# Updated 2026 umpire data — retired umps removed, zones refreshed
 UMPIRE_DATA = {
-    "Angel Hernandez": {"factor": 1.08, "zone": "Loose"},
-    "CB Bucknor":      {"factor": 1.06, "zone": "Loose"},
-    "Joe West":        {"factor": 1.05, "zone": "Loose"},
-    "Dan Iassogna":    {"factor": 1.04, "zone": "Loose"},
-    "Adrian Johnson":  {"factor": 1.04, "zone": "Loose"},
-    "Laz Diaz":        {"factor": 1.03, "zone": "Loose"},
-    "Junior Valentine":{"factor": 1.05, "zone": "Loose"},
-    "Mark Carlson":    {"factor": 1.02, "zone": "Average"},
-    "Phil Cuzzi":      {"factor": 1.02, "zone": "Average"},
-    "Jim Reynolds":    {"factor": 1.01, "zone": "Average"},
-    "Bill Miller":     {"factor": 1.00, "zone": "Average"},
-    "John Tumpane":    {"factor": 1.00, "zone": "Average"},
-    "Todd Tichenor":   {"factor": 1.00, "zone": "Average"},
-    "David Rackley":   {"factor": 1.01, "zone": "Average"},
-    "Nate Tomlinson":  {"factor": 1.00, "zone": "Average"},
-    "Alex MacKay":     {"factor": 1.03, "zone": "Average"},
-    "Nestor Ceja":     {"factor": 1.02, "zone": "Average"},
-    "Clint Vondrak":   {"factor": 0.99, "zone": "Average"},
-    "Vic Carapazza":   {"factor": 0.99, "zone": "Tight"},
-    "Brian Gorman":    {"factor": 0.99, "zone": "Tight"},
-    "Mike Everitt":    {"factor": 0.99, "zone": "Tight"},
-    "Stu Scheurwater": {"factor": 0.98, "zone": "Tight"},
-    "Ryan Additon":    {"factor": 0.98, "zone": "Tight"},
-    "Larry Vanover":   {"factor": 0.98, "zone": "Tight"},
-    "Tim Timmons":     {"factor": 0.98, "zone": "Tight"},
-    "Chris Guccione":  {"factor": 0.97, "zone": "Tight"},
-    "Brennan Miller":  {"factor": 0.97, "zone": "Tight"},
-    "Marvin Hudson":   {"factor": 0.97, "zone": "Tight"},
-    "Doug Eddings":    {"factor": 0.96, "zone": "Tight"},
-    "James Hoye":      {"factor": 0.96, "zone": "Tight"},
-    "Jeremie Rehak":   {"factor": 0.96, "zone": "Tight"},
-    "Bob Davidson":    {"factor": 0.95, "zone": "Tight"},
-    "Mike DiMuro":     {"factor": 0.95, "zone": "Tight"},
-    "Jeff Kellogg":    {"factor": 0.95, "zone": "Tight"},
-    "Jerry Meals":     {"factor": 0.94, "zone": "Tight"},
-    "Tom Hallion":     {"factor": 0.94, "zone": "Tight"},
-    "Sam Holbrook":    {"factor": 0.93, "zone": "Tight"},
-    "Ted Barrett":     {"factor": 0.93, "zone": "Tight"},
-    "Mark Wegner":     {"factor": 0.92, "zone": "Tight"},
-    "Lance Barrett":   {"factor": 0.92, "zone": "Tight"},
+    # Loose zone — run-friendly
+    "Junior Valentine": {"factor": 1.06, "zone": "Loose"},
+    "Dan Iassogna":     {"factor": 1.05, "zone": "Loose"},
+    "Adrian Johnson":   {"factor": 1.04, "zone": "Loose"},
+    "Laz Diaz":         {"factor": 1.04, "zone": "Loose"},
+    "CB Bucknor":       {"factor": 1.03, "zone": "Loose"},
+    "Alan Porter":      {"factor": 1.04, "zone": "Loose"},
+    "Brennan Miller":   {"factor": 1.03, "zone": "Loose"},
+    # Average zone
+    "Alex MacKay":      {"factor": 1.02, "zone": "Average"},
+    "Nestor Ceja":      {"factor": 1.02, "zone": "Average"},
+    "Mark Carlson":     {"factor": 1.01, "zone": "Average"},
+    "Phil Cuzzi":       {"factor": 1.01, "zone": "Average"},
+    "Jim Reynolds":     {"factor": 1.01, "zone": "Average"},
+    "David Rackley":    {"factor": 1.00, "zone": "Average"},
+    "Nate Tomlinson":   {"factor": 1.00, "zone": "Average"},
+    "John Tumpane":     {"factor": 1.00, "zone": "Average"},
+    "Todd Tichenor":    {"factor": 1.00, "zone": "Average"},
+    "Bill Miller":      {"factor": 1.00, "zone": "Average"},
+    "Clint Vondrak":    {"factor": 0.99, "zone": "Average"},
+    "Roberto Ortiz":    {"factor": 1.00, "zone": "Average"},
+    "Jim Wolf":         {"factor": 1.00, "zone": "Average"},
+    "Ryan Additon":     {"factor": 0.99, "zone": "Average"},
+    # Tight zone — pitcher-friendly
+    "Vic Carapazza":    {"factor": 0.98, "zone": "Tight"},
+    "Brian Gorman":     {"factor": 0.98, "zone": "Tight"},
+    "Mike Everitt":     {"factor": 0.98, "zone": "Tight"},
+    "Stu Scheurwater":  {"factor": 0.97, "zone": "Tight"},
+    "Tim Timmons":      {"factor": 0.97, "zone": "Tight"},
+    "Chris Guccione":   {"factor": 0.97, "zone": "Tight"},
+    "Marvin Hudson":    {"factor": 0.96, "zone": "Tight"},
+    "Doug Eddings":     {"factor": 0.96, "zone": "Tight"},
+    "James Hoye":       {"factor": 0.96, "zone": "Tight"},
+    "Jeremie Rehak":    {"factor": 0.95, "zone": "Tight"},
+    "Mike DiMuro":      {"factor": 0.95, "zone": "Tight"},
+    "Jerry Meals":      {"factor": 0.94, "zone": "Tight"},
+    "Sam Holbrook":     {"factor": 0.94, "zone": "Tight"},
+    "Mark Wegner":      {"factor": 0.93, "zone": "Tight"},
+    "Lance Barrett":    {"factor": 0.93, "zone": "Tight"},
+    "Larry Vanover":    {"factor": 0.97, "zone": "Tight"},
 }
 
 def get_umpire_data(ump_name):
@@ -629,19 +640,21 @@ TEAM_BULLPEN_FALLBACK = {
 
 @st.cache_data(ttl=3600)
 def fetch_live_team_stats():
+    """Fetches overall RPG, home RPG, away RPG, and bullpen ERA from MLB Stats API."""
     import requests as _req
-    rpg, bullpen_era = {}, {}
+    rpg, home_rpg, away_rpg, bullpen_era = {}, {}, {}, {}
     season = datetime.today().year
     try:
         teams_resp = _req.get(
             f"https://statsapi.mlb.com/api/v1/teams?sportId=1&season={season}", timeout=10)
         if teams_resp.status_code != 200:
-            return rpg, bullpen_era
+            return rpg, bullpen_era, home_rpg, away_rpg
         for team in teams_resp.json().get('teams', []):
             team_id = team.get('id')
             team_name = team.get('name', '')
             if not team_id or not team_name:
                 continue
+            # Overall hitting
             try:
                 h_resp = _req.get(
                     f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
@@ -657,6 +670,28 @@ def fetch_live_team_stats():
                                 rpg[team_name] = min(round(runs / gp, 2), MAX_TEAM_RPG)
             except Exception:
                 pass
+            # Home/away splits
+            try:
+                ha_resp = _req.get(
+                    f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
+                    f"?stats=statSplits&group=hitting&season={season}&sportId=1"
+                    f"&sitCodes=h,a", timeout=8)
+                if ha_resp.status_code == 200:
+                    for sg in ha_resp.json().get('stats', []):
+                        for split in sg.get('splits', []):
+                            sit = split.get('split', {}).get('code', '')
+                            stat = split.get('stat', {})
+                            runs = int(stat.get('runs', 0) or 0)
+                            gp = int(stat.get('gamesPlayed', 0) or 0)
+                            if gp >= 5 and runs > 0:
+                                val = min(round(runs / gp, 2), MAX_TEAM_RPG)
+                                if sit == 'h':
+                                    home_rpg[team_name] = val
+                                elif sit == 'a':
+                                    away_rpg[team_name] = val
+            except Exception:
+                pass
+            # Bullpen ERA
             try:
                 p_resp = _req.get(
                     f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
@@ -674,7 +709,7 @@ def fetch_live_team_stats():
                 pass
     except Exception:
         pass
-    return rpg, bullpen_era
+    return rpg, bullpen_era, home_rpg, away_rpg
 
 def apply_era_regression(era_val, ip):
     if era_val < ERA_REGRESSION_THRESHOLD and ip < ERA_REGRESSION_MIN_IP:
@@ -812,7 +847,7 @@ def fetch_stadium_weather(home_team, game_hour_utc=None):
     except Exception:
         return None
 
-_live_rpg, _live_bullpen = fetch_live_team_stats()
+_live_rpg, _live_bullpen, _live_home_rpg, _live_away_rpg = fetch_live_team_stats()
 _todays_umps = fetch_todays_umpires()
 
 with st.sidebar:
@@ -825,6 +860,7 @@ with st.sidebar:
     st.markdown(f"**Umpires:** {'✅' if _todays_umps else '⚠️'} {len(_todays_umps)} games")
     st.markdown("---")
     st.markdown(f"**Live RPG:** {'✅' if len(_live_rpg) >= 20 else '⚠️'} {len(_live_rpg)} teams")
+    st.markdown(f"**Live Home/Away:** {'✅' if len(_live_home_rpg) >= 20 else '⚠️'} {len(_live_home_rpg)} teams")
     st.markdown(f"**Live Bullpen ERA:** {'✅' if len(_live_bullpen) >= 20 else '⚠️'} {len(_live_bullpen)} teams")
     st.caption("Live stats kick in after 5+ games played.")
     st.markdown("---")
@@ -1137,7 +1173,14 @@ def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
                     real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
                         value=float(bet_amt), step=1.0, key=f"real_{prefix}_over_{game_id}")
                 if st.button(f"Log {prefix} OVER", key=f"log_{prefix}_over_{game_id}"):
-                    if save_bet(today, away, home, away_pitcher, home_pitcher,
+                    if check_duplicate_bet(today, away, home, market_type):
+                        st.warning("Already logged this game/market today. Log anyway?")
+                        if st.button(f"Confirm log {prefix} OVER", key=f"confirm_{prefix}_over_{game_id}"):
+                            if save_bet(today, away, home, away_pitcher, home_pitcher,
+                                        model_total, line, price_cents, auto_prob, auto_prob,
+                                        over_edge, "OVER", bet_amt, market_type, game_id):
+                                st.success("Logged!")
+                    elif save_bet(today, away, home, away_pitcher, home_pitcher,
                                 model_total, line, price_cents, auto_prob, auto_prob,
                                 over_edge, "OVER", bet_amt, market_type, game_id):
                         st.success("Logged!")
@@ -1155,13 +1198,28 @@ def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
                     real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
                         value=float(bet_amt), step=1.0, key=f"real_{prefix}_under_{game_id}")
                 if st.button(f"Log {prefix} UNDER", key=f"log_{prefix}_under_{game_id}"):
-                    if save_bet(today, away, home, away_pitcher, home_pitcher,
+                    if check_duplicate_bet(today, away, home, market_type):
+                        st.warning("Already logged this game/market today. Log anyway?")
+                        if st.button(f"Confirm log {prefix} UNDER", key=f"confirm_{prefix}_under_{game_id}"):
+                            if save_bet(today, away, home, away_pitcher, home_pitcher,
+                                        model_total, line, price_cents, auto_prob, auto_prob,
+                                        under_edge, "UNDER", bet_amt, market_type, game_id):
+                                st.success("Logged!")
+                    elif save_bet(today, away, home, away_pitcher, home_pitcher,
                                 model_total, line, price_cents, auto_prob, auto_prob,
                                 under_edge, "UNDER", bet_amt, market_type, game_id):
                         st.success("Logged!")
         else:
             st.info(f"UNDER | Edge: {e}%")
     return over_edge, under_edge
+
+def check_duplicate_bet(game_date, away, home, market_type):
+    """Returns True if a bet for this game/market already exists today."""
+    try:
+        rows = supabase.table("mlb_settlements").select("id")            .eq("game_date", game_date)            .eq("away_team", away)            .eq("home_team", home)            .eq("market_type", market_type)            .execute().data or []
+        return len(rows) > 0
+    except Exception:
+        return False
 
 def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
              kalshi_line, kalshi_over_price, model_prob, your_prob, edge,
