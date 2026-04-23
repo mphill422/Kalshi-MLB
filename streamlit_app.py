@@ -1184,20 +1184,47 @@ def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
         st.error(f"Save error: {e}")
         return False
 
+def _team_match(stored, api_name):
+    """Fuzzy match team names — handles partial matches in either direction."""
+    if not stored or not api_name: return False
+    s, a = stored.lower().strip(), api_name.lower().strip()
+    # Check last word (e.g. "Pirates" in "Pittsburgh Pirates")
+    s_last = s.split()[-1] if s.split() else s
+    a_last = a.split()[-1] if a.split() else a
+    return s in a or a in s or s_last == a_last
+
 def fetch_final_score(game_id=None, game_date=None, away_team=None, home_team=None):
     try:
-        games = statsapi.schedule(game_id=int(game_id), sportId=1) if game_id else \
-                statsapi.schedule(date=game_date, sportId=1)
-        if not games: return None
-        for g in games:
-            if not game_id:
-                if not (away_team and away_team.lower() in g.get('away_name', '').lower()): continue
-                if not (home_team and home_team.lower() in g.get('home_name', '').lower()): continue
-            if not any(s.lower() in g.get('status', '').lower() for s in ['final', 'game over', 'completed']):
-                return None
-            ar, hr = g.get('away_score'), g.get('home_score')
-            if ar is None or hr is None: return None
-            return int(ar), int(hr), int(ar) + int(hr)
+        # Try by game_id first
+        if game_id:
+            try:
+                games = statsapi.schedule(game_id=int(game_id), sportId=1)
+                if games:
+                    g = games[0]
+                    if any(s.lower() in g.get('status', '').lower() for s in ['final', 'game over', 'completed']):
+                        ar, hr = g.get('away_score'), g.get('home_score')
+                        if ar is not None and hr is not None:
+                            return int(ar), int(hr), int(ar) + int(hr)
+            except Exception:
+                pass
+
+        # Fallback: search by date + fuzzy team name match
+        if game_date:
+            try:
+                games = statsapi.schedule(date=game_date, sportId=1)
+                if not games: return None
+                for g in games:
+                    away_ok = _team_match(away_team, g.get('away_name', ''))
+                    home_ok = _team_match(home_team, g.get('home_name', ''))
+                    if not (away_ok and home_ok): continue
+                    if not any(s.lower() in g.get('status', '').lower() for s in ['final', 'game over', 'completed']):
+                        return None
+                    ar, hr = g.get('away_score'), g.get('home_score')
+                    if ar is None or hr is None: return None
+                    return int(ar), int(hr), int(ar) + int(hr)
+            except Exception:
+                pass
+
         return None
     except Exception:
         return None
