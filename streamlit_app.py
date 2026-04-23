@@ -1459,6 +1459,7 @@ with tab1:
             st.warning("No games scheduled today.")
         else:
             rows = []
+            _row_errors = []
             for g in schedule:
                 try:
                     if g.get('game_type', 'R') not in ('R', 'F', 'D', 'L', 'W'):
@@ -1575,9 +1576,12 @@ with tab1:
                         "Edge%": _fg_edge_pct,
                         "Signal": _fg_signal_str,
                     })
-                except Exception:
+                except Exception as _row_err:
+                    _row_errors.append(str(_row_err))
                     continue
 
+            if _row_errors and not rows:
+                st.error(f"Row build error: {_row_errors[0]}")
             if rows:
                 st.markdown("<div class='section-header'>Today's Slate</div>", unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
