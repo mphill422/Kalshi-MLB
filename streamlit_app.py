@@ -1540,6 +1540,9 @@ with tab1:
 
                     _ap_abbr = abbrev_pitcher(_ap, _f5.get("away_days_rest"))
                     _hp_abbr = abbrev_pitcher(_hp, _f5.get("home_days_rest"))
+                    _odds_f5 = match_odds(_away, _home, odds_f5_lines)
+                    _vegas_str = f"{_odds['total']}" if _odds else "-"
+                    _vegas_f5_str = f"{_odds_f5['total']}" if _odds_f5 else "-"
                     def _fmt_edge(edge, blocked):
                         if blocked: return "-"
                         val = min(abs(edge) * 100, 20.0)
@@ -1547,9 +1550,6 @@ with tab1:
                         return f"{'+' if val > 0 else ''}{round(val,1)}%{'!' if abs(edge)*100 > 20 else ''}"
                     _f5_edge_pct = _fmt_edge(_f5_edge, _f5_default_blocked)
                     _fg_edge_pct = _fmt_edge(_fg_edge, _fg_default_blocked)
-                    _vegas_str = f"{_odds['total']}" if _odds else "-"
-                    _odds_f5 = match_odds(_away, _home, odds_f5_lines)
-                    _vegas_f5_str = f"{_odds_f5['total']}" if _odds_f5 else "-"
 
                     _f5_signal_str = "—" if _f5_sig == "—" else f"{_f5_dir} {_f5_sig}"
                     _fg_signal_str = "—" if _fg_sig == "—" else f"{_fg_dir} {_fg_sig}"
