@@ -1492,6 +1492,9 @@ with tab1:
                     _fg_edge = (_fg_prob - _kf_price/100) if _fg_lean == "OVER" else ((1-_fg_prob) - (1-_kf_price/100))
                     _f5_default_blocked = (_f5_line == DEFAULT_F5_LINE and not odds_lines)
                     _fg_default_blocked = (_fg_line == DEFAULT_FG_LINE and not odds_lines)
+                    _odds_f5 = match_odds(_away, _home, odds_f5_lines)
+                    _vegas_str = f"{_odds['total']}" if _odds else "-"
+                    _vegas_f5_str = f"{_odds_f5['total']}" if _odds_f5 else "-"
 
                     def _vegas_agrees(model_total, vegas_str, lean):
                         """Returns True if Vegas is within 1.0 run of model, or Vegas unavailable."""
@@ -1540,9 +1543,6 @@ with tab1:
 
                     _ap_abbr = abbrev_pitcher(_ap, _f5.get("away_days_rest"))
                     _hp_abbr = abbrev_pitcher(_hp, _f5.get("home_days_rest"))
-                    _odds_f5 = match_odds(_away, _home, odds_f5_lines)
-                    _vegas_str = f"{_odds['total']}" if _odds else "-"
-                    _vegas_f5_str = f"{_odds_f5['total']}" if _odds_f5 else "-"
                     def _fmt_edge(edge, blocked):
                         if blocked: return "-"
                         val = min(abs(edge) * 100, 20.0)
