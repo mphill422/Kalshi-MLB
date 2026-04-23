@@ -222,7 +222,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 BANKROLL = 500
-EDGE_THRESHOLD = 0.08
+EDGE_THRESHOLD = 0.10
 KELLY_FRACTION = 0.5
 MAX_BET_PCT = 0.05
 LEAGUE_AVG_ERA = 4.20
@@ -1488,16 +1488,32 @@ with tab1:
                     _f5_default_blocked = (_f5_line == DEFAULT_F5_LINE and not odds_lines)
                     _fg_default_blocked = (_fg_line == DEFAULT_FG_LINE and not odds_lines)
 
-                    def _signal(lean, edge, default_blocked):
+                    def _vegas_agrees(model_total, vegas_str, lean):
+                        """Returns True if Vegas is within 1.0 run of model, or Vegas unavailable."""
+                        if not vegas_str or vegas_str == "-": return True
+                        try:
+                            vegas_val = float(vegas_str)
+                            diff = model_total - vegas_val
+                            if lean == "OVER": return diff >= -1.0
+                            if lean == "UNDER": return diff <= 1.0
+                        except Exception:
+                            pass
+                        return True
+
+                    def _signal(lean, edge, default_blocked, model_total=None, vegas_str=None):
                         if default_blocked: return "—", ""
                         if lean == "EVEN" or abs(edge) < EDGE_THRESHOLD: return "—", ""
+                        # Vegas agreement filter
+                        if model_total and vegas_str and not _vegas_agrees(model_total, vegas_str, lean):
+                            return "—", ""
                         direction = "🟢 OVR" if lean == "OVER" else "🔴 UND"
-                        if abs(edge) * 100 >= 12: return "🔥 HOT", direction
-                        if abs(edge) * 100 >= 8: return "⚡ EDGE", direction
+                        e = min(abs(edge) * 100, 20.0)  # cap display at 20%
+                        if e >= 15: return "🔥 HOT", direction
+                        if e >= 10: return "⚡ EDGE", direction
                         return "👍", direction
 
-                    _f5_sig, _f5_dir = _signal(_f5_lean, _f5_edge, _f5_default_blocked)
-                    _fg_sig, _fg_dir = _signal(_fg_lean, _fg_edge, _fg_default_blocked)
+                    _f5_sig, _f5_dir = _signal(_f5_lean, _f5_edge, _f5_default_blocked, _f5["total"], _vegas_f5_str)
+                    _fg_sig, _fg_dir = _signal(_fg_lean, _fg_edge, _fg_default_blocked, _fg["total"], _vegas_str)
 
                     if _dome:
                         _cond = "Dome"
@@ -1519,8 +1535,13 @@ with tab1:
 
                     _ap_abbr = abbrev_pitcher(_ap, _f5.get("away_days_rest"))
                     _hp_abbr = abbrev_pitcher(_hp, _f5.get("home_days_rest"))
-                    _f5_edge_pct = f"{'+' if _f5_edge > 0 else ''}{round(_f5_edge*100,1)}%" if not _f5_default_blocked else "-"
-                    _fg_edge_pct = f"{'+' if _fg_edge > 0 else ''}{round(_fg_edge*100,1)}%" if not _fg_default_blocked else "-"
+                    def _fmt_edge(edge, blocked):
+                        if blocked: return "-"
+                        val = min(abs(edge) * 100, 20.0)
+                        val = val if edge > 0 else -val
+                        return f"{'+' if val > 0 else ''}{round(val,1)}%{'!' if abs(edge)*100 > 20 else ''}"
+                    _f5_edge_pct = _fmt_edge(_f5_edge, _f5_default_blocked)
+                    _fg_edge_pct = _fmt_edge(_fg_edge, _fg_default_blocked)
                     _vegas_str = f"{_odds['total']}" if _odds else "-"
                     _odds_f5 = match_odds(_away, _home, odds_f5_lines)
                     _vegas_f5_str = f"{_odds_f5['total']}" if _odds_f5 else "-"
