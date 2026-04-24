@@ -1073,8 +1073,9 @@ def calc_fg(away, home, away_pitcher, home_pitcher, pf, weather, game_id=None, g
     ump_name = _todays_umps.get(str(game_id), "") if game_id else ""
     ump_factor, ump_zone = get_umpire_data(ump_name)
     raw = (base_adj + away_sp_adj + home_sp_adj + away_bp_adj + home_bp_adj + w_adj + t_adj) * ump_factor
+    FG_CALIBRATION = 0.88  # Correction factor — model runs ~1.5-2.5 too high on FG based on Apr 2026 data
     return {
-        "total": round(raw * pf, 1), "base": base_adj,
+        "total": round(raw * pf * FG_CALIBRATION, 1), "base": base_adj,
         "away_era": away_era, "away_recent": away_recent, "away_src": away_src,
         "home_era": home_era, "home_recent": home_recent, "home_src": home_src,
         "away_sp_adj": away_sp_adj, "home_sp_adj": home_sp_adj,
@@ -1182,14 +1183,7 @@ def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
                     real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
                         value=float(bet_amt), step=1.0, key=f"real_{prefix}_over_{game_id}")
                 if st.button(f"Log {prefix} OVER", key=f"log_{prefix}_over_{game_id}"):
-                    if check_duplicate_bet(today, away, home, market_type):
-                        st.warning("Already logged this game/market today. Log anyway?")
-                        if st.button(f"Confirm log {prefix} OVER", key=f"confirm_{prefix}_over_{game_id}"):
-                            if save_bet(today, away, home, away_pitcher, home_pitcher,
-                                        model_total, line, price_cents, auto_prob, auto_prob,
-                                        over_edge, "OVER", bet_amt, market_type, game_id):
-                                st.success("Logged!")
-                    elif save_bet(today, away, home, away_pitcher, home_pitcher,
+                    if save_bet(today, away, home, away_pitcher, home_pitcher,
                                 model_total, line, price_cents, auto_prob, auto_prob,
                                 over_edge, "OVER", bet_amt, market_type, game_id):
                         st.success("Logged!")
@@ -1207,14 +1201,7 @@ def signal_boxes(model_total, line, price_cents, game_id, prefix, away, home,
                     real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
                         value=float(bet_amt), step=1.0, key=f"real_{prefix}_under_{game_id}")
                 if st.button(f"Log {prefix} UNDER", key=f"log_{prefix}_under_{game_id}"):
-                    if check_duplicate_bet(today, away, home, market_type):
-                        st.warning("Already logged this game/market today. Log anyway?")
-                        if st.button(f"Confirm log {prefix} UNDER", key=f"confirm_{prefix}_under_{game_id}"):
-                            if save_bet(today, away, home, away_pitcher, home_pitcher,
-                                        model_total, line, price_cents, auto_prob, auto_prob,
-                                        under_edge, "UNDER", bet_amt, market_type, game_id):
-                                st.success("Logged!")
-                    elif save_bet(today, away, home, away_pitcher, home_pitcher,
+                    if save_bet(today, away, home, away_pitcher, home_pitcher,
                                 model_total, line, price_cents, auto_prob, auto_prob,
                                 under_edge, "UNDER", bet_amt, market_type, game_id):
                         st.success("Logged!")
