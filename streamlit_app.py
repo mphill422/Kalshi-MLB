@@ -1488,32 +1488,35 @@ with tab1:
                     _vegas_str = f"{_odds['total']}" if _odds else "-"
                     _vegas_f5_str = f"{_odds_f5['total']}" if _odds_f5 else "-"
 
-                    def _vegas_agrees(model_total, vegas_str, lean):
-                        """Returns True if Vegas is within 1.0 run of model, or Vegas unavailable."""
-                        if not vegas_str or vegas_str == "-": return True
+                    def _vegas_agrees(model_total, vegas_str, lean, tolerance=0.5):
+                        """Returns True if Vegas is within tolerance runs of model."""
+                        if not vegas_str or vegas_str == "-": return None  # None = no data
                         try:
                             vegas_val = float(vegas_str)
                             diff = model_total - vegas_val
-                            if lean == "OVER": return diff >= -1.0
-                            if lean == "UNDER": return diff <= 1.0
+                            if lean == "OVER": return diff >= -tolerance
+                            if lean == "UNDER": return diff <= tolerance
                         except Exception:
                             pass
-                        return True
+                        return None
 
-                    def _signal(lean, edge, default_blocked, model_total=None, vegas_str=None):
+                    def _signal(lean, edge, default_blocked, model_total=None, vegas_str=None, require_vegas=False):
                         if default_blocked: return "—", ""
                         if lean == "EVEN" or abs(edge) < EDGE_THRESHOLD: return "—", ""
-                        # Vegas agreement filter
-                        if model_total and vegas_str and not _vegas_agrees(model_total, vegas_str, lean):
-                            return "—", ""
+                        agrees = _vegas_agrees(model_total, vegas_str, lean)
+                        # FG requires Vegas to be present and agree
+                        if require_vegas and agrees is None: return "—", ""
+                        # If Vegas is present but disagrees, suppress signal
+                        if agrees is False: return "—", ""
                         direction = "🟢 OVR" if lean == "OVER" else "🔴 UND"
-                        e = min(abs(edge) * 100, 20.0)  # cap display at 20%
+                        e = min(abs(edge) * 100, 20.0)
                         if e >= 15: return "🔥 HOT", direction
                         if e >= 10: return "⚡ EDGE", direction
                         return "👍", direction
 
-                    _f5_sig, _f5_dir = _signal(_f5_lean, _f5_edge, _f5_default_blocked, _f5["total"], _vegas_f5_str)
-                    _fg_sig, _fg_dir = _signal(_fg_lean, _fg_edge, _fg_default_blocked, _fg["total"], _vegas_str)
+                    # FG requires Vegas; F5 fires without Vegas if unavailable
+                    _f5_sig, _f5_dir = _signal(_f5_lean, _f5_edge, _f5_default_blocked, _f5["total"], _vegas_f5_str, require_vegas=False)
+                    _fg_sig, _fg_dir = _signal(_fg_lean, _fg_edge, _fg_default_blocked, _fg["total"], _vegas_str, require_vegas=True)
 
                     if _dome:
                         _cond = "Dome"
