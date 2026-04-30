@@ -94,10 +94,10 @@ st.markdown(f"""
 <div class="mph-header">
   <div>
     <div class="mph-title">⚾ MPH <span>MLB</span> Model</div>
-    <div class="mph-sub">Vegas-Anchored &middot; First 5 Innings &middot; Full Game &nbsp;<span class="pill-live">&#9679; LIVE</span></div>
+    <div class="mph-sub">Independent &middot; First 5 Innings &middot; Full Game &nbsp;<span class="pill-live">&#9679; LIVE</span></div>
   </div>
   <div style="text-align:right">
-    <div class="mph-badge">V5.0</div>
+    <div class="mph-badge">V5.1</div>
     <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y &middot; %-I:%M %p ET')}</div>
   </div>
 </div>
@@ -110,6 +110,7 @@ KELLY_FRACTION = 0.5
 MAX_BET_PCT = 0.05
 LEAGUE_AVG_ERA = 4.20
 LEAGUE_AVG_BULLPEN_ERA = 4.10
+LEAGUE_AVG_RPG = 4.50          # league average runs per team per game
 SP_INNINGS = 5.0
 TOTAL_INNINGS = 9.0
 F5_INNINGS = 5.0
@@ -281,7 +282,7 @@ PITCHER_HAND = {
     "Frankie Montas": "R", "Foster Griffin": "L",
 }
 
-# ── Umpire Data (2026 updated) ──
+# ── Umpire Data ──
 UMPIRE_DATA = {
     "Junior Valentine": {"factor": 1.06, "zone": "Loose"},
     "Dan Iassogna":     {"factor": 1.05, "zone": "Loose"},
@@ -610,37 +611,30 @@ def fetch_stadium_weather(home_team, game_hour_utc=None):
         return None
 
 # ══════════════════════════════════════════════════════════════════════
-# V5.0 CORE: VEGAS-ANCHORED ADJUSTMENT MODEL
+# V5.1 CORE: INDEPENDENT MODEL
+# Builds run totals from ERA up. Vegas is display-only reference.
 # ══════════════════════════════════════════════════════════════════════
 
-def calc_sp_era_adj(pitcher_name, opposing_team, game_date, innings):
+def _sp_runs_allowed(pitcher_name, game_date, innings, pf, ump_factor):
     """
-    Calculate SP ERA adjustment vs league average.
-    Positive = pitcher worse than avg (adds runs), Negative = pitcher better (removes runs).
+    Runs allowed by a SP over given innings.
+    ERA → runs/inning → scale to innings → apply park + ump.
     """
     era, recent, src = blend_era(pitcher_name)
     rest_adj, days_rest = get_rest_adj(pitcher_name, game_date)
     hand = PITCHER_HAND.get(pitcher_name, "R")
-    era_with_rest = era + rest_adj
-    # Adjustment = how many runs above/below league avg over innings pitched
-    adj = round(((era_with_rest - LEAGUE_AVG_ERA) / 9) * innings * 0.5, 2)
-    return adj, era, recent, src, rest_adj, days_rest, hand
+    era_adj = era + rest_adj
+    runs = round((era_adj / 9) * innings * pf * ump_factor, 3)
+    return runs, era, recent, src, rest_adj, days_rest, hand
 
-def calc_bullpen_adj(team_name, innings):
-    """Bullpen ERA adjustment vs league average for given innings."""
+def _bp_runs_allowed(team_name, innings, pf, ump_factor):
+    """Runs allowed by bullpen over given innings."""
     bp_era = get_bullpen_era(team_name)
-    adj = round(((bp_era - LEAGUE_AVG_BULLPEN_ERA) / 9) * innings, 2)
-    return adj, bp_era
+    runs = round((bp_era / 9) * innings * pf * ump_factor, 3)
+    return runs, bp_era
 
-def calc_park_adj(home_team, vegas_line):
-    """Park factor run adjustment — how many runs the park adds/removes."""
-    pf = get_park_factor(home_team)
-    # Convert multiplicative park factor to additive run adjustment
-    adj = round((pf - 1.0) * vegas_line, 2)
-    return adj, pf
-
-def calc_weather_adj(weather, home_team, scale=1.0):
-    """Weather run adjustment."""
+def _weather_run_adj(weather, home_team, scale=1.0):
+    """Additive run adjustment from wind and temperature."""
     if not weather or weather.get("dome"): return 0.0, 0.0, None
     wspeed = weather.get("wind_speed_mph") or 0
     wdir = weather.get("wind_dir_deg") or 0
@@ -658,102 +652,90 @@ def calc_weather_adj(weather, home_team, scale=1.0):
         t_adj = round((60 - temp) * -0.015 * scale, 2)
     return w_adj, t_adj, w_label
 
-def calc_ump_factor(game_id):
+def calc_independent_total_fg(away, home, away_pitcher, home_pitcher, weather, game_id, game_date):
+    """
+    V5.1 independent FG model.
+    Builds total from ERA/bullpen/park/ump/weather. No Vegas anchor.
+    away_runs  = runs scored by away team  = home SP allows + home BP allows
+    home_runs  = runs scored by home team  = away SP allows + away BP allows
+    """
+    pf = get_park_factor(home)
     ump_name = _todays_umps.get(str(game_id), "") if game_id else ""
-    factor, zone = get_umpire_data(ump_name)
-    return factor, zone, ump_name
+    ump_factor, ump_zone = get_umpire_data(ump_name)
 
-def calc_adjusted_total_fg(away, home, away_pitcher, home_pitcher, vegas_line, weather, game_id, game_date):
-    """
-    V5.0 Vegas-anchored FG model.
-    Start with Vegas line, apply our adjustments, return adjusted total.
-    """
-    if not vegas_line: return None, {}
-
-    # SP adjustments (both pitchers affect runs scored by opposing team)
-    away_sp_adj, away_era, away_recent, away_src, away_rest, away_days_rest, away_hand = \
-        calc_sp_era_adj(away_pitcher, home, game_date, SP_INNINGS)
-    home_sp_adj, home_era, home_recent, home_src, home_rest, home_days_rest, home_hand = \
-        calc_sp_era_adj(home_pitcher, away, game_date, SP_INNINGS)
-
-    # Bullpen adjustments (4 innings each)
     bp_inn = TOTAL_INNINGS - SP_INNINGS
-    away_bp_adj, away_bp_era = calc_bullpen_adj(away, bp_inn)
-    home_bp_adj, home_bp_era = calc_bullpen_adj(home, bp_inn)
 
-    # Park adjustment
-    park_adj, pf = calc_park_adj(home, vegas_line)
+    # Away runs: home pitcher gives them up
+    home_sp_runs, home_era, home_recent, home_src, home_rest, home_days_rest, home_hand = \
+        _sp_runs_allowed(home_pitcher, game_date, SP_INNINGS, pf, ump_factor)
+    away_bp_runs, away_bp_era = _bp_runs_allowed(away, bp_inn, pf, ump_factor)
+    # Away team scores: home SP runs + away bullpen (away BP pitches in home half... 
+    # actually: away runs scored = home pitcher allows + home bullpen allows)
+    home_bp_runs, home_bp_era = _bp_runs_allowed(home, bp_inn, pf, ump_factor)
+    away_sp_runs, away_era, away_recent, away_src, away_rest, away_days_rest, away_hand = \
+        _sp_runs_allowed(away_pitcher, game_date, SP_INNINGS, pf, ump_factor)
 
-    # Weather adjustment
-    w_adj, t_adj, w_label = calc_weather_adj(weather, home, scale=1.0)
+    # Total runs: away scores (home pitcher allows) + home scores (away pitcher allows)
+    # Away scores = home_sp_runs + home_bp_runs (home pitchers pitch to away batters)
+    # Home scores = away_sp_runs + away_bp_runs (away pitchers pitch to home batters)
+    away_scores = round(home_sp_runs + home_bp_runs, 3)
+    home_scores = round(away_sp_runs + away_bp_runs, 3)
+    raw_total = away_scores + home_scores
 
-    # Umpire
-    ump_factor, ump_zone, ump_name = calc_ump_factor(game_id)
-
-    # Total adjustment (sum of all factors)
-    total_adj = away_sp_adj + home_sp_adj + away_bp_adj + home_bp_adj + park_adj + w_adj + t_adj
-    # Apply umpire as a multiplier on the adjustments
-    total_adj = round(total_adj * ump_factor, 2)
-
-    # Adjusted total = Vegas line + our adjustments
-    adjusted = round(vegas_line + total_adj, 1)
+    # Weather
+    w_adj, t_adj, w_label = _weather_run_adj(weather, home, scale=1.0)
+    total = round(raw_total + w_adj + t_adj, 1)
 
     detail = {
-        "vegas_line": vegas_line, "adjusted_total": adjusted, "total_adj": total_adj,
+        "model_total": total, "raw_total": round(raw_total, 2),
+        "away_scores": round(away_scores, 2), "home_scores": round(home_scores, 2),
         "away_era": away_era, "away_recent": away_recent, "away_src": away_src,
         "home_era": home_era, "home_recent": home_recent, "home_src": home_src,
-        "away_sp_adj": away_sp_adj, "home_sp_adj": home_sp_adj,
+        "away_sp_runs": round(away_sp_runs, 2), "home_sp_runs": round(home_sp_runs, 2),
         "away_bp_era": away_bp_era, "home_bp_era": home_bp_era,
-        "away_bp_adj": away_bp_adj, "home_bp_adj": home_bp_adj,
-        "park_adj": park_adj, "pf": pf,
+        "away_bp_runs": round(away_bp_runs, 2), "home_bp_runs": round(home_bp_runs, 2),
+        "pf": pf,
         "wind_adj": w_adj, "temp_adj": t_adj, "wind_label": w_label,
         "ump_factor": ump_factor, "ump_zone": ump_zone, "ump_name": ump_name,
         "away_hand": away_hand, "home_hand": home_hand,
         "away_rest": away_rest, "away_days_rest": away_days_rest,
         "home_rest": home_rest, "home_days_rest": home_days_rest,
     }
-    return adjusted, detail
+    return total, detail
 
-def calc_adjusted_total_f5(away, home, away_pitcher, home_pitcher, vegas_f5_line, vegas_fg_line, weather, game_id, game_date):
+def calc_independent_total_f5(away, home, away_pitcher, home_pitcher, weather, game_id, game_date):
     """
-    V5.0 Vegas-anchored F5 model.
-    Uses F5 Vegas line if available, otherwise derives from FG Vegas line.
+    V5.1 independent F5 model.
+    SP innings only — no bullpen. Park + ump + weather scaled to 5 innings.
     """
-    # If no F5 Vegas line, derive from FG (F5 ≈ FG * 0.52)
-    if not vegas_f5_line:
-        if not vegas_fg_line: return None, {}
-        vegas_f5_line = round(vegas_fg_line * 0.52, 1)
-        derived = True
-    else:
-        derived = False
+    pf = get_park_factor(home)
+    ump_name = _todays_umps.get(str(game_id), "") if game_id else ""
+    ump_factor, ump_zone = get_umpire_data(ump_name)
 
-    away_sp_adj, away_era, away_recent, away_src, away_rest, away_days_rest, away_hand = \
-        calc_sp_era_adj(away_pitcher, home, game_date, F5_INNINGS)
-    home_sp_adj, home_era, home_recent, home_src, home_rest, home_days_rest, home_hand = \
-        calc_sp_era_adj(home_pitcher, away, game_date, F5_INNINGS)
+    home_sp_runs, home_era, home_recent, home_src, home_rest, home_days_rest, home_hand = \
+        _sp_runs_allowed(home_pitcher, game_date, F5_INNINGS, pf, ump_factor)
+    away_sp_runs, away_era, away_recent, away_src, away_rest, away_days_rest, away_hand = \
+        _sp_runs_allowed(away_pitcher, game_date, F5_INNINGS, pf, ump_factor)
 
-    park_adj, pf = calc_park_adj(home, vegas_f5_line)
-    w_adj, t_adj, w_label = calc_weather_adj(weather, home, scale=F5_INNINGS/TOTAL_INNINGS)
-    ump_factor, ump_zone, ump_name = calc_ump_factor(game_id)
+    # away scores = home SP allows; home scores = away SP allows
+    raw_total = home_sp_runs + away_sp_runs
 
-    total_adj = away_sp_adj + home_sp_adj + park_adj + w_adj + t_adj
-    total_adj = round(total_adj * ump_factor, 2)
-    adjusted = round(vegas_f5_line + total_adj, 1)
+    w_adj, t_adj, w_label = _weather_run_adj(weather, home, scale=F5_INNINGS / TOTAL_INNINGS)
+    total = round(raw_total + w_adj + t_adj, 1)
 
     detail = {
-        "vegas_line": vegas_f5_line, "adjusted_total": adjusted, "total_adj": total_adj,
-        "derived_f5": derived,
+        "model_total": total, "raw_total": round(raw_total, 2),
         "away_era": away_era, "away_recent": away_recent, "away_src": away_src,
         "home_era": home_era, "home_recent": home_recent, "home_src": home_src,
-        "away_sp_adj": away_sp_adj, "home_sp_adj": home_sp_adj,
-        "park_adj": park_adj, "pf": pf,
+        "away_sp_runs": round(away_sp_runs, 2), "home_sp_runs": round(home_sp_runs, 2),
+        "pf": pf,
         "wind_adj": w_adj, "temp_adj": t_adj, "wind_label": w_label,
         "ump_factor": ump_factor, "ump_zone": ump_zone, "ump_name": ump_name,
         "away_hand": away_hand, "home_hand": home_hand,
         "away_rest": away_rest, "away_days_rest": away_days_rest,
         "home_rest": home_rest, "home_days_rest": home_days_rest,
     }
-    return adjusted, detail
+    return total, detail
 
 # ── Probability ──
 @st.cache_data(ttl=3600)
@@ -988,14 +970,9 @@ def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
         return False
 
 # ── Signal Logic ──
-def calc_signal(adjusted_total, kalshi_line, kalshi_price_cents, vegas_line=None):
-    """
-    V5.0 signal: compare adjusted total to Kalshi line.
-    Requires Vegas line to be present for FG.
-    Returns (lean, edge, prob_detail).
-    """
-    if not kalshi_line: return "EVEN", 0.0, {}
-    prob_detail = model_to_prob_detail(adjusted_total, kalshi_line)
+def calc_signal(model_total, kalshi_line, kalshi_price_cents):
+    if not kalshi_line or not model_total: return "EVEN", 0.0, {}
+    prob_detail = model_to_prob_detail(model_total, kalshi_line)
     model_prob = prob_detail["final"] / 100
     implied = kalshi_price_cents / 100
     over_edge = model_prob - implied
@@ -1006,9 +983,8 @@ def calc_signal(adjusted_total, kalshi_line, kalshi_price_cents, vegas_line=None
         return "UNDER", under_edge, prob_detail
     return "EVEN", 0.0, prob_detail
 
-def signal_label(lean, edge, require_vegas=False, has_vegas=False):
+def signal_label(lean, edge):
     if lean == "EVEN" or abs(edge) < EDGE_THRESHOLD: return "—", ""
-    if require_vegas and not has_vegas: return "—", ""
     direction = "🟢 OVR" if lean == "OVER" else "🔴 UND"
     e = min(abs(edge) * 100, 20.0)
     if e >= 15: return "🔥 HOT", direction
@@ -1023,12 +999,12 @@ def fmt_edge(edge, has_signal):
     return f"{sign}{round(val, 1)}%{suffix}"
 
 # ── Signal boxes in expander ──
-def signal_boxes(adjusted_total, kalshi_line, price_cents, game_id, prefix,
-                 away, home, ap, hp, market_type, today, vegas_line=None):
+def signal_boxes(model_total, kalshi_line, price_cents, game_id, prefix,
+                 away, home, ap, hp, market_type, today):
     if not kalshi_line:
         st.warning("No Kalshi line loaded.")
         return
-    lean, edge, prob_detail = calc_signal(adjusted_total, kalshi_line, price_cents, vegas_line)
+    lean, edge, prob_detail = calc_signal(model_total, kalshi_line, price_cents)
     auto_prob = int(prob_detail.get("final", 50))
     implied = price_cents / 100
     over_edge = (auto_prob / 100) - implied
@@ -1053,7 +1029,7 @@ def signal_boxes(adjusted_total, kalshi_line, price_cents, game_id, prefix,
                 else:
                     real_amt = None
                 if st.button(f"Log {prefix} OVER", key=f"log_{prefix}_over_{game_id}"):
-                    if save_bet(today, away, home, ap, hp, adjusted_total, kalshi_line,
+                    if save_bet(today, away, home, ap, hp, model_total, kalshi_line,
                                 price_cents, auto_prob, auto_prob, over_edge, "OVER",
                                 bet_amt, market_type, game_id, placed, real_amt):
                         st.success("Logged!")
@@ -1072,7 +1048,7 @@ def signal_boxes(adjusted_total, kalshi_line, price_cents, game_id, prefix,
                 else:
                     real_amt = None
                 if st.button(f"Log {prefix} UNDER", key=f"log_{prefix}_under_{game_id}"):
-                    if save_bet(today, away, home, ap, hp, adjusted_total, kalshi_line,
+                    if save_bet(today, away, home, ap, hp, model_total, kalshi_line,
                                 price_cents, auto_prob, auto_prob, under_edge, "UNDER",
                                 bet_amt, market_type, game_id, placed, real_amt):
                         st.success("Logged!")
@@ -1102,10 +1078,10 @@ with st.sidebar:
     st.markdown("**Weather:** Open-Meteo (free)")
     st.markdown(f"**Umpires:** {'✅' if _todays_umps else '⚠️'} {len(_todays_umps)} games")
     st.markdown("---")
-    st.markdown("**V5.0 — Vegas-Anchored Model**")
-    st.caption("Starts from Vegas line, applies ERA/bullpen/park/weather adjustments")
-    st.caption("FG requires Vegas to signal")
-    st.caption("F5 signals without Vegas when unavailable")
+    st.markdown("**V5.1 — Independent Model**")
+    st.caption("Builds total from ERA/bullpen/park/ump/weather")
+    st.caption("Vegas shown as reference only — not used in calculation")
+    st.caption("Signals fire vs Kalshi line independently")
     st.caption(f"Edge threshold: {int(EDGE_THRESHOLD*100)}%")
 
 # ── Tabs ──
@@ -1139,7 +1115,7 @@ with tab1:
                     g_utc_hour = datetime.strptime(g['game_datetime'], '%Y-%m-%dT%H:%M:%SZ').hour
                     wx = fetch_stadium_weather(home, game_hour_utc=g_utc_hour)
 
-                    # Get Vegas lines
+                    # Vegas — display only
                     _odds = match_odds(away, home, odds_lines)
                     _odds_f5 = match_odds(away, home, odds_f5_lines)
                     vegas_fg = float(_odds["total"]) if _odds else None
@@ -1147,7 +1123,7 @@ with tab1:
                     vegas_fg_str = str(vegas_fg) if vegas_fg else "-"
                     vegas_f5_str = str(vegas_f5) if vegas_f5 else "-"
 
-                    # Get Kalshi lines
+                    # Kalshi lines
                     _kf = match_kalshi(away, home, kalshi_lines, "full")
                     _k5 = match_kalshi(away, home, kalshi_lines, "f5")
                     kalshi_fg_line = float(_kf["line"]) if _kf else None
@@ -1155,19 +1131,18 @@ with tab1:
                     kalshi_fg_price = int(_kf["over_price_cents"]) if _kf else 50
                     kalshi_f5_price = int(_k5["over_price_cents"]) if _k5 else 50
 
-                    # V5.0: Calculate adjusted totals from Vegas anchor
-                    adj_fg, fg_detail = calc_adjusted_total_fg(
-                        away, home, ap, hp, vegas_fg, wx, game_id, game_date)
-                    adj_f5, f5_detail = calc_adjusted_total_f5(
-                        away, home, ap, hp, vegas_f5, vegas_fg, wx, game_id, game_date)
+                    # V5.1: Independent totals
+                    adj_fg, fg_detail = calc_independent_total_fg(
+                        away, home, ap, hp, wx, game_id, game_date)
+                    adj_f5, f5_detail = calc_independent_total_f5(
+                        away, home, ap, hp, wx, game_id, game_date)
 
-                    # Signals
-                    fg_lean, fg_edge, fg_prob = calc_signal(adj_fg, kalshi_fg_line, kalshi_fg_price, vegas_fg)
-                    f5_lean, f5_edge, f5_prob = calc_signal(adj_f5, kalshi_f5_line, kalshi_f5_price, vegas_f5)
+                    # Signals — compare model total to Kalshi line directly
+                    fg_lean, fg_edge, fg_prob = calc_signal(adj_fg, kalshi_fg_line, kalshi_fg_price)
+                    f5_lean, f5_edge, f5_prob = calc_signal(adj_f5, kalshi_f5_line, kalshi_f5_price)
 
-                    # FG requires Vegas; F5 can fire without
-                    fg_sig, fg_dir = signal_label(fg_lean, fg_edge, require_vegas=True, has_vegas=bool(vegas_fg))
-                    f5_sig, f5_dir = signal_label(f5_lean, f5_edge, require_vegas=False, has_vegas=bool(vegas_f5))
+                    fg_sig, fg_dir = signal_label(fg_lean, fg_edge)
+                    f5_sig, f5_dir = signal_label(f5_lean, f5_edge)
 
                     fg_has_sig = fg_sig != "—"
                     f5_has_sig = f5_sig != "—"
@@ -1202,7 +1177,7 @@ with tab1:
                     rows.append({
                         "Time": et, "Game": f"{abbrev_team(away)}@{abbrev_team(home)}",
                         "Away": ap_abbr, "Home": hp_abbr, "Cond": cond,
-                        "Mkt": "F5", "Adj": f5_model_str,
+                        "Mkt": "F5", "Model": f5_model_str,
                         "Kalshi": f5_line_str, "Vegas": vegas_f5_str,
                         "Edge": fmt_edge(f5_edge, f5_has_sig),
                         "Sig": f5_sig_str,
@@ -1214,7 +1189,7 @@ with tab1:
                     fg_sig_str = "—" if fg_sig == "—" else f"{fg_dir} {fg_sig}"
                     rows.append({
                         "Time": "", "Game": "", "Away": "", "Home": "", "Cond": "",
-                        "Mkt": "FG", "Adj": fg_model_str,
+                        "Mkt": "FG", "Model": fg_model_str,
                         "Kalshi": fg_line_str, "Vegas": vegas_fg_str,
                         "Edge": fmt_edge(fg_edge, fg_has_sig),
                         "Sig": fg_sig_str,
@@ -1249,7 +1224,7 @@ with tab1:
                     "Home":   st.column_config.TextColumn("Home SP", width="small"),
                     "Cond":   st.column_config.TextColumn("Cond", width="medium"),
                     "Mkt":    st.column_config.TextColumn("Mkt", width="small"),
-                    "Adj":    st.column_config.TextColumn("Adj", width="small"),
+                    "Model":  st.column_config.TextColumn("Model", width="small"),
                     "Kalshi": st.column_config.TextColumn("Kalshi", width="small"),
                     "Vegas":  st.column_config.TextColumn("Vegas", width="small"),
                     "Edge":   st.column_config.TextColumn("Edge", width="small"),
@@ -1257,12 +1232,12 @@ with tab1:
                 }
 
                 if view_type == "Mobile":
-                    mob_cols = ["Time", "Game", "Mkt", "Adj", "Kalshi", "Vegas", "Edge", "Sig"]
+                    mob_cols = ["Time", "Game", "Mkt", "Model", "Kalshi", "Vegas", "Edge", "Sig"]
                     st.dataframe(df_all[mob_cols].style.set_properties(**{'text-align': 'center'}),
                                  use_container_width=True, hide_index=True,
                                  column_config={k: col_cfg[k] for k in mob_cols})
                 else:
-                    desk_cols = ["Time", "Game", "Away", "Home", "Cond", "Mkt", "Adj", "Kalshi", "Vegas", "Edge", "Sig"]
+                    desk_cols = ["Time", "Game", "Away", "Home", "Cond", "Mkt", "Model", "Kalshi", "Vegas", "Edge", "Sig"]
                     st.dataframe(df_all[desk_cols].style.set_properties(**{'text-align': 'center'}),
                                  use_container_width=True, hide_index=True,
                                  column_config={k: col_cfg[k] for k in desk_cols})
@@ -1296,10 +1271,10 @@ with tab1:
                     kalshi_fg_price = int(_kf["over_price_cents"]) if _kf else 50
                     kalshi_f5_price = int(_k5["over_price_cents"]) if _k5 else 50
 
-                    adj_fg, fg_detail = calc_adjusted_total_fg(
-                        away, home, ap, hp, vegas_fg, wx, game_id, game_date)
-                    adj_f5, f5_detail = calc_adjusted_total_f5(
-                        away, home, ap, hp, vegas_f5, vegas_fg, wx, game_id, game_date)
+                    adj_fg, fg_detail = calc_independent_total_fg(
+                        away, home, ap, hp, wx, game_id, game_date)
+                    adj_f5, f5_detail = calc_independent_total_f5(
+                        away, home, ap, hp, wx, game_id, game_date)
 
                     with st.expander(f"**{away} @ {home}** — {et}"):
                         # SP Info
@@ -1313,10 +1288,10 @@ with tab1:
                         )
 
                         # Umpire
-                        ump = f5_detail.get('ump_name', '')
+                        ump = fg_detail.get('ump_name', '')
                         if ump:
-                            zone = f5_detail.get('ump_zone', 'Average')
-                            factor = f5_detail.get('ump_factor', 1.0)
+                            zone = fg_detail.get('ump_zone', 'Average')
+                            factor = fg_detail.get('ump_factor', 1.0)
                             st.caption(f"Ump: {ump} | Zone: {zone} | Factor: {factor:.2f}")
                         else:
                             st.caption("Ump: Not yet announced")
@@ -1347,22 +1322,19 @@ with tab1:
                         st.markdown("**First 5 Innings**")
                         if adj_f5:
                             c1, c2, c3 = st.columns(3)
-                            with c1:
-                                derived_note = " (derived)" if f5_detail.get("derived_f5") else ""
-                                st.metric("Vegas F5", f"{f5_detail.get('vegas_line','?')}{derived_note}")
-                            with c2:
-                                st.metric("Adj Total", adj_f5)
-                            with c3:
-                                st.metric("Adjustment", f"{f5_detail.get('total_adj',0):+.2f}")
-                            with st.expander("F5 adjustment breakdown"):
-                                st.caption(f"Away SP ({ap}): ERA {f5_detail.get('away_era','?')} → adj {f5_detail.get('away_sp_adj',0):+.2f}")
-                                st.caption(f"Home SP ({hp}): ERA {f5_detail.get('home_era','?')} → adj {f5_detail.get('home_sp_adj',0):+.2f}")
-                                st.caption(f"Park factor {f5_detail.get('pf',1.0):.2f} → adj {f5_detail.get('park_adj',0):+.2f}")
+                            with c1: st.metric("Model F5", adj_f5)
+                            with c2: st.metric("Kalshi F5", kalshi_f5_line or "—")
+                            with c3: st.metric("Vegas F5", vegas_f5 or "—")
+                            with st.expander("F5 breakdown"):
+                                st.caption(f"Away SP ({ap}): ERA {f5_detail.get('away_era','?')} → {f5_detail.get('away_sp_runs',0):.2f} runs allowed")
+                                st.caption(f"Home SP ({hp}): ERA {f5_detail.get('home_era','?')} → {f5_detail.get('home_sp_runs',0):.2f} runs allowed")
+                                st.caption(f"Park factor: {f5_detail.get('pf',1.0):.2f}")
                                 if f5_detail.get('wind_adj', 0) != 0:
-                                    st.caption(f"Wind ({f5_detail.get('wind_label','')}) → adj {f5_detail.get('wind_adj',0):+.2f}")
+                                    st.caption(f"Wind ({f5_detail.get('wind_label','')}) → {f5_detail.get('wind_adj',0):+.2f}")
                                 if f5_detail.get('temp_adj', 0) != 0:
-                                    st.caption(f"Temp → adj {f5_detail.get('temp_adj',0):+.2f}")
+                                    st.caption(f"Temp → {f5_detail.get('temp_adj',0):+.2f}")
                                 st.caption(f"Ump factor: {f5_detail.get('ump_factor',1.0):.2f}")
+                                st.caption(f"Raw total: {f5_detail.get('raw_total','?')}")
 
                             if _k5:
                                 st.success(f"Kalshi F5: {kalshi_f5_line} | Over: {kalshi_f5_price}c")
@@ -1373,9 +1345,9 @@ with tab1:
                             f5_price_in = st.number_input("F5 Over Price (c)", 1, 99,
                                 kalshi_f5_price, 1, key=f"f5p_{game_id}")
                             signal_boxes(adj_f5, f5_line_in, f5_price_in, game_id,
-                                        "F5", away, home, ap, hp, "f5", today, vegas_f5)
+                                        "F5", away, home, ap, hp, "f5", today)
                         else:
-                            st.info("No Vegas line available for F5 model.")
+                            st.info("F5 model unavailable.")
 
                         st.markdown("---")
 
@@ -1383,26 +1355,24 @@ with tab1:
                         st.markdown("**Full Game**")
                         if adj_fg:
                             c1, c2, c3 = st.columns(3)
-                            with c1:
-                                st.metric("Vegas FG", f"{fg_detail.get('vegas_line','?')}")
-                            with c2:
-                                st.metric("Adj Total", adj_fg)
-                            with c3:
-                                st.metric("Adjustment", f"{fg_detail.get('total_adj',0):+.2f}")
-                            with st.expander("FG adjustment breakdown"):
-                                st.caption(f"Away SP ({ap}): ERA {fg_detail.get('away_era','?')} → adj {fg_detail.get('away_sp_adj',0):+.2f}")
-                                st.caption(f"Home SP ({hp}): ERA {fg_detail.get('home_era','?')} → adj {fg_detail.get('home_sp_adj',0):+.2f}")
-                                st.caption(f"Away bullpen ERA {fg_detail.get('away_bp_era','?')} → adj {fg_detail.get('away_bp_adj',0):+.2f}")
-                                st.caption(f"Home bullpen ERA {fg_detail.get('home_bp_era','?')} → adj {fg_detail.get('home_bp_adj',0):+.2f}")
-                                st.caption(f"Park factor {fg_detail.get('pf',1.0):.2f} → adj {fg_detail.get('park_adj',0):+.2f}")
+                            with c1: st.metric("Model FG", adj_fg)
+                            with c2: st.metric("Kalshi FG", kalshi_fg_line or "—")
+                            with c3: st.metric("Vegas FG", vegas_fg or "—")
+                            with st.expander("FG breakdown"):
+                                st.caption(f"Away scores (home pitching): {fg_detail.get('away_scores',0):.2f} runs")
+                                st.caption(f"  Home SP ({hp}): ERA {fg_detail.get('home_era','?')} → {fg_detail.get('home_sp_runs',0):.2f}")
+                                st.caption(f"  Home BP: ERA {fg_detail.get('home_bp_era','?')} → {fg_detail.get('home_bp_runs',0):.2f}")
+                                st.caption(f"Home scores (away pitching): {fg_detail.get('home_scores',0):.2f} runs")
+                                st.caption(f"  Away SP ({ap}): ERA {fg_detail.get('away_era','?')} → {fg_detail.get('away_sp_runs',0):.2f}")
+                                st.caption(f"  Away BP: ERA {fg_detail.get('away_bp_era','?')} → {fg_detail.get('away_bp_runs',0):.2f}")
+                                st.caption(f"Park factor: {fg_detail.get('pf',1.0):.2f}")
                                 if fg_detail.get('wind_adj', 0) != 0:
-                                    st.caption(f"Wind ({fg_detail.get('wind_label','')}) → adj {fg_detail.get('wind_adj',0):+.2f}")
+                                    st.caption(f"Wind ({fg_detail.get('wind_label','')}) → {fg_detail.get('wind_adj',0):+.2f}")
                                 if fg_detail.get('temp_adj', 0) != 0:
-                                    st.caption(f"Temp → adj {fg_detail.get('temp_adj',0):+.2f}")
+                                    st.caption(f"Temp → {fg_detail.get('temp_adj',0):+.2f}")
                                 st.caption(f"Ump factor: {fg_detail.get('ump_factor',1.0):.2f}")
+                                st.caption(f"Raw total: {fg_detail.get('raw_total','?')}")
 
-                            if _odds:
-                                st.info(f"Vegas: {vegas_fg} | Over odds: {_odds.get('over_odds','?')}")
                             if _kf:
                                 st.success(f"Kalshi FG: {kalshi_fg_line} | Over: {kalshi_fg_price}c")
                             else:
@@ -1412,9 +1382,9 @@ with tab1:
                             fg_price_in = st.number_input("FG Over Price (c)", 1, 99,
                                 kalshi_fg_price, 1, key=f"fgp_{game_id}")
                             signal_boxes(adj_fg, fg_line_in, fg_price_in, game_id,
-                                        "FG", away, home, ap, hp, "full", today, vegas_fg)
+                                        "FG", away, home, ap, hp, "full", today)
                         else:
-                            st.warning("No Vegas FG line — FG signals require Vegas.")
+                            st.info("FG model unavailable.")
 
                 except Exception as ge:
                     st.warning(f"Could not load game: {ge}")
