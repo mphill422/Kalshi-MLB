@@ -94,10 +94,10 @@ st.markdown(f"""
 <div class="mph-header">
   <div>
     <div class="mph-title">⚾ MPH <span>MLB</span> Model</div>
-    <div class="mph-sub">Run Expectancy &middot; First 5 Innings &middot; Full Game &nbsp;<span class="pill-live">&#9679; LIVE</span></div>
+    <div class="mph-sub">Run Expectancy + Conviction Ensemble &nbsp;<span class="pill-live">&#9679; LIVE</span></div>
   </div>
   <div style="text-align:right">
-    <div class="mph-badge">V5.2</div>
+    <div class="mph-badge">V5.3</div>
     <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y &middot; %-I:%M %p ET')}</div>
   </div>
 </div>
@@ -105,12 +105,13 @@ st.markdown(f"""
 
 # ── Constants ──
 BANKROLL = 500
-EDGE_THRESHOLD = 0.10
+EDGE_MIN = 0.10
+EDGE_MAX = 0.15            # NEW V5.3: edges above this = model unreliable, skip
 KELLY_FRACTION = 0.5
 MAX_BET_PCT = 0.05
 LEAGUE_AVG_ERA = 4.20
 LEAGUE_AVG_BULLPEN_ERA = 4.10
-LEAGUE_AVG_RPG = 4.50          # runs per team per game — baseline for run expectancy
+LEAGUE_AVG_RPG = 4.50
 SP_INNINGS = 5.0
 BP_INNINGS = 4.0
 TOTAL_INNINGS = 9.0
@@ -118,6 +119,11 @@ F5_INNINGS = 5.0
 ERA_REGRESSION_FLOOR = 3.00
 ERA_REGRESSION_THRESHOLD = 2.00
 ERA_REGRESSION_MIN_IP = 10.0
+
+# Conviction thresholds
+CONV_HIGH_MIN = 6   # 6-8 points = HIGH
+CONV_MED_MIN = 4    # 4-5 points = MED
+                    # 0-3 = LOW
 
 # ── Supabase ──
 try:
@@ -500,11 +506,11 @@ TEAM_BULLPEN_FALLBACK = {
 
 def get_bullpen_era(team_name):
     live = fetch_live_bullpen_era(team_name)
-    if live: return live
+    if live: return live, "live"
     for key in TEAM_BULLPEN_FALLBACK:
         if key.lower() in team_name.lower() or team_name.lower() in key.lower():
-            return TEAM_BULLPEN_FALLBACK[key]
-    return LEAGUE_AVG_BULLPEN_ERA
+            return TEAM_BULLPEN_FALLBACK[key], "fallback"
+    return LEAGUE_AVG_BULLPEN_ERA, "default"
 
 @st.cache_data(ttl=3600)
 def fetch_todays_umpires():
@@ -609,15 +615,10 @@ def fetch_stadium_weather(home_team, game_hour_utc=None):
         return None
 
 # ══════════════════════════════════════════════════════════════════════
-# V5.2 CORE: RUN EXPECTANCY MODEL
-# Baseline: LEAGUE_AVG_RPG per team. ERA ratio scales runs up/down.
-# away_runs = LEAGUE_AVG_RPG * (home_pitcher_era / LEAGUE_AVG_ERA) * inning_frac * pf * ump
-# home_runs = LEAGUE_AVG_RPG * (away_pitcher_era / LEAGUE_AVG_ERA) * inning_frac * pf * ump
-# Vegas is display-only — never used in calculation.
+# V5.2 CORE: RUN EXPECTANCY MODEL (unchanged)
 # ══════════════════════════════════════════════════════════════════════
 
 def _get_pitcher_inputs(pitcher_name, game_date):
-    """Blended ERA with rest adjustment, recent ERA, source, hand."""
     era, recent, src = blend_era(pitcher_name)
     rest_adj, days_rest = get_rest_adj(pitcher_name, game_date)
     hand = PITCHER_HAND.get(pitcher_name, "R")
@@ -643,29 +644,19 @@ def _weather_run_adj(weather, home_team, scale=1.0):
     return w_adj, t_adj, w_label
 
 def calc_run_expectancy_f5(away, home, away_pitcher, home_pitcher, weather, game_id, game_date):
-    """
-    F5: SP innings only.
-    away_runs = RPG * (home_sp_era / LG_ERA) * (5/9) * pf * ump
-    home_runs = RPG * (away_sp_era / LG_ERA) * (5/9) * pf * ump
-    """
     pf = get_park_factor(home)
     ump_name = _todays_umps.get(str(game_id), "") if game_id else ""
     ump_factor, ump_zone = get_umpire_data(ump_name)
-
     away_era, away_era_raw, away_recent, away_src, away_rest, away_days_rest, away_hand = \
         _get_pitcher_inputs(away_pitcher, game_date)
     home_era, home_era_raw, home_recent, home_src, home_rest, home_days_rest, home_hand = \
         _get_pitcher_inputs(home_pitcher, game_date)
-
-    inn_frac = F5_INNINGS / TOTAL_INNINGS  # 5/9
-
+    inn_frac = F5_INNINGS / TOTAL_INNINGS
     away_runs = LEAGUE_AVG_RPG * (home_era / LEAGUE_AVG_ERA) * inn_frac * pf * ump_factor
     home_runs = LEAGUE_AVG_RPG * (away_era / LEAGUE_AVG_ERA) * inn_frac * pf * ump_factor
-
     raw_total = away_runs + home_runs
     w_adj, t_adj, w_label = _weather_run_adj(weather, home, scale=inn_frac)
     total = round(raw_total + w_adj + t_adj, 1)
-
     detail = {
         "model_total": total, "raw_total": round(raw_total, 2),
         "away_runs": round(away_runs, 2), "home_runs": round(home_runs, 2),
@@ -678,44 +669,31 @@ def calc_run_expectancy_f5(away, home, away_pitcher, home_pitcher, weather, game
         "away_hand": away_hand, "home_hand": home_hand,
         "pf": pf, "ump_factor": ump_factor, "ump_zone": ump_zone, "ump_name": ump_name,
         "wind_adj": w_adj, "temp_adj": t_adj, "wind_label": w_label,
+        "away_bp_src": None, "home_bp_src": None,
     }
     return total, detail
 
 def calc_run_expectancy_fg(away, home, away_pitcher, home_pitcher, weather, game_id, game_date):
-    """
-    FG: SP (5 inn) + BP (4 inn) per side.
-    away_runs = RPG*(home_sp_era/LG_ERA)*(5/9)*pf*ump + RPG*(home_bp_era/LG_BP_ERA)*(4/9)*pf*ump
-    home_runs = RPG*(away_sp_era/LG_ERA)*(5/9)*pf*ump + RPG*(away_bp_era/LG_BP_ERA)*(4/9)*pf*ump
-    """
     pf = get_park_factor(home)
     ump_name = _todays_umps.get(str(game_id), "") if game_id else ""
     ump_factor, ump_zone = get_umpire_data(ump_name)
-
     away_era, away_era_raw, away_recent, away_src, away_rest, away_days_rest, away_hand = \
         _get_pitcher_inputs(away_pitcher, game_date)
     home_era, home_era_raw, home_recent, home_src, home_rest, home_days_rest, home_hand = \
         _get_pitcher_inputs(home_pitcher, game_date)
-
-    away_bp_era = get_bullpen_era(away)
-    home_bp_era = get_bullpen_era(home)
-
-    sp_frac = SP_INNINGS / TOTAL_INNINGS   # 5/9
-    bp_frac = BP_INNINGS / TOTAL_INNINGS   # 4/9
-
-    # Away scores: home pitching gives them up
+    away_bp_era, away_bp_src = get_bullpen_era(away)
+    home_bp_era, home_bp_src = get_bullpen_era(home)
+    sp_frac = SP_INNINGS / TOTAL_INNINGS
+    bp_frac = BP_INNINGS / TOTAL_INNINGS
     away_sp_runs = LEAGUE_AVG_RPG * (home_era / LEAGUE_AVG_ERA) * sp_frac * pf * ump_factor
     away_bp_runs = LEAGUE_AVG_RPG * (home_bp_era / LEAGUE_AVG_BULLPEN_ERA) * bp_frac * pf * ump_factor
     away_runs = away_sp_runs + away_bp_runs
-
-    # Home scores: away pitching gives them up
     home_sp_runs = LEAGUE_AVG_RPG * (away_era / LEAGUE_AVG_ERA) * sp_frac * pf * ump_factor
     home_bp_runs = LEAGUE_AVG_RPG * (away_bp_era / LEAGUE_AVG_BULLPEN_ERA) * bp_frac * pf * ump_factor
     home_runs = home_sp_runs + home_bp_runs
-
     raw_total = away_runs + home_runs
     w_adj, t_adj, w_label = _weather_run_adj(weather, home, scale=1.0)
     total = round(raw_total + w_adj + t_adj, 1)
-
     detail = {
         "model_total": total, "raw_total": round(raw_total, 2),
         "away_runs": round(away_runs, 2), "home_runs": round(home_runs, 2),
@@ -726,6 +704,7 @@ def calc_run_expectancy_fg(away, home, away_pitcher, home_pitcher, weather, game
         "home_era": home_era_raw, "home_era_adj": home_era,
         "home_recent": home_recent, "home_src": home_src,
         "away_bp_era": away_bp_era, "home_bp_era": home_bp_era,
+        "away_bp_src": away_bp_src, "home_bp_src": home_bp_src,
         "away_rest": away_rest, "away_days_rest": away_days_rest,
         "home_rest": home_rest, "home_days_rest": home_days_rest,
         "away_hand": away_hand, "home_hand": home_hand,
@@ -771,6 +750,104 @@ def abbrev_pitcher(name, days_rest=None):
     if days_rest is not None and days_rest <= 3:
         abbr = f"!{abbr}"
     return abbr
+
+# ══════════════════════════════════════════════════════════════════════
+# V5.3 NEW: CONVICTION ENSEMBLE
+# 4 signals, each scored 0-2 points (max 8):
+#   1. Poisson/MC agreement
+#   2. ERA data quality (LIVE vs fallback)
+#   3. Recent vs season ERA agreement
+#   4. Vegas agreement with model
+# Tiers:
+#   🔵 HIGH: 6-8 pts
+#   🟡 MED:  4-5 pts
+#   ⚪ LOW:  0-3 pts
+# ══════════════════════════════════════════════════════════════════════
+
+def score_poisson_mc_agreement(prob_detail):
+    """Score how closely Poisson and Monte Carlo agree."""
+    p, mc = prob_detail.get("poisson", 50), prob_detail.get("monte_carlo", 50)
+    diff = abs(p - mc)
+    if diff <= 3: return 2, f"Poisson/MC: {p:.0f}%/{mc:.0f}% (Δ{diff:.1f})"
+    if diff <= 6: return 1, f"Poisson/MC: {p:.0f}%/{mc:.0f}% (Δ{diff:.1f})"
+    return 0, f"Poisson/MC: {p:.0f}%/{mc:.0f}% (Δ{diff:.1f}) — diverge"
+
+def score_era_data_quality(detail, market_type="full"):
+    """Score ERA source quality. FG also factors bullpen sources."""
+    away_src = detail.get("away_src", "default")
+    home_src = detail.get("home_src", "default")
+    sp_score = 0
+    if away_src == "live" and home_src == "live":
+        sp_score = 2
+    elif "live" in (away_src, home_src):
+        sp_score = 1
+    if market_type == "f5":
+        return sp_score, f"SP ERA: {away_src.upper()}/{home_src.upper()}"
+    # FG: factor bullpen sources
+    away_bp = detail.get("away_bp_src", "default")
+    home_bp = detail.get("home_bp_src", "default")
+    bp_live = sum(1 for x in (away_bp, home_bp) if x == "live")
+    # Combined: 2 if SP both live AND at least 1 BP live; 1 if mixed; 0 if mostly default
+    if sp_score == 2 and bp_live >= 1:
+        return 2, f"SP: {away_src.upper()}/{home_src.upper()} | BP: {away_bp.upper()}/{home_bp.upper()}"
+    if sp_score >= 1 or bp_live >= 1:
+        return 1, f"SP: {away_src.upper()}/{home_src.upper()} | BP: {away_bp.upper()}/{home_bp.upper()}"
+    return 0, f"SP: {away_src.upper()}/{home_src.upper()} | BP: {away_bp.upper()}/{home_bp.upper()}"
+
+def score_recent_vs_season(detail):
+    """Score agreement between recent (last 3 starts) and season ERA for both pitchers."""
+    aw_season = detail.get("away_era")
+    aw_recent = detail.get("away_recent")
+    hm_season = detail.get("home_era")
+    hm_recent = detail.get("home_recent")
+    diffs = []
+    if aw_season is not None and aw_recent is not None:
+        diffs.append(abs(aw_season - aw_recent))
+    if hm_season is not None and hm_recent is not None:
+        diffs.append(abs(hm_season - hm_recent))
+    if not diffs:
+        return 0, "Recent ERA: unavailable"
+    max_diff = max(diffs)
+    avg_diff = sum(diffs) / len(diffs)
+    if max_diff <= 0.75:
+        return 2, f"Recent vs season: aligned (max Δ {max_diff:.2f})"
+    if max_diff <= 1.50:
+        return 1, f"Recent vs season: minor div (max Δ {max_diff:.2f})"
+    return 0, f"Recent vs season: diverge (max Δ {max_diff:.2f})"
+
+def score_vegas_agreement(model_total, vegas_total):
+    """Score how closely model agrees with Vegas line (sharp money confirmation)."""
+    if vegas_total is None or model_total is None:
+        return 0, "Vegas: unavailable"
+    diff = abs(model_total - vegas_total)
+    if diff <= 0.5:
+        return 2, f"Vegas: {vegas_total} (Δ {diff:.1f}) — agrees"
+    if diff <= 1.0:
+        return 1, f"Vegas: {vegas_total} (Δ {diff:.1f}) — close"
+    return 0, f"Vegas: {vegas_total} (Δ {diff:.1f}) — disagrees"
+
+def calc_conviction(detail, prob_detail, vegas_total, market_type="full"):
+    """Run all 4 conviction signals, return total score, tier, and breakdown."""
+    s1, r1 = score_poisson_mc_agreement(prob_detail)
+    s2, r2 = score_era_data_quality(detail, market_type)
+    s3, r3 = score_recent_vs_season(detail)
+    s4, r4 = score_vegas_agreement(detail.get("model_total"), vegas_total)
+    total = s1 + s2 + s3 + s4
+    if total >= CONV_HIGH_MIN:
+        tier, icon, label = "HIGH", "🔵", "🔵 HIGH"
+    elif total >= CONV_MED_MIN:
+        tier, icon, label = "MED", "🟡", "🟡 MED"
+    else:
+        tier, icon, label = "LOW", "⚪", "⚪ LOW"
+    return {
+        "score": total, "max_score": 8, "tier": tier, "icon": icon, "label": label,
+        "signals": [
+            {"name": "Poisson/MC agreement", "points": s1, "detail": r1},
+            {"name": "ERA data quality", "points": s2, "detail": r2},
+            {"name": "Recent vs season ERA", "points": s3, "detail": r3},
+            {"name": "Vegas agreement", "points": s4, "detail": r4},
+        ],
+    }
 
 # ── Odds API ──
 @st.cache_data(ttl=300)
@@ -948,9 +1025,10 @@ def run_auto_settlement():
 def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
              kalshi_line, kalshi_over_price, model_prob, your_prob, edge,
              direction, bet_amt, market_type="full", game_id=None,
-             placed_on_kalshi=False, real_amount=None):
+             placed_on_kalshi=False, real_amount=None, conviction_tier=None,
+             conviction_score=None):
     try:
-        supabase.table("mlb_settlements").insert({
+        record = {
             "game_date": game_date, "away_team": away, "home_team": home,
             "away_pitcher": away_pitcher, "home_pitcher": home_pitcher,
             "model_total": model_total, "kalshi_line": kalshi_line,
@@ -960,7 +1038,19 @@ def save_bet(game_date, away, home, away_pitcher, home_pitcher, model_total,
             "market_type": market_type, "game_id": game_id,
             "placed_on_kalshi": placed_on_kalshi,
             "real_amount": real_amount if placed_on_kalshi else None,
-        }).execute()
+        }
+        # Try to include conviction if columns exist; if they don't, drop and retry
+        if conviction_tier is not None:
+            record["conviction_tier"] = conviction_tier
+        if conviction_score is not None:
+            record["conviction_score"] = conviction_score
+        try:
+            supabase.table("mlb_settlements").insert(record).execute()
+        except Exception:
+            # Fall back: drop conviction columns
+            record.pop("conviction_tier", None)
+            record.pop("conviction_score", None)
+            supabase.table("mlb_settlements").insert(record).execute()
         return True
     except Exception as e:
         st.error(f"Save error: {e}")
@@ -981,23 +1071,43 @@ def calc_signal(model_total, kalshi_line, kalshi_price_cents):
     return "EVEN", 0.0, prob_detail
 
 def signal_label(lean, edge):
-    if lean == "EVEN" or abs(edge) < EDGE_THRESHOLD: return "—", ""
+    """V5.3: only label edges in the 10-15% sweet spot. >15% = unreliable."""
+    if lean == "EVEN": return "—", ""
+    abs_e = abs(edge) * 100
+    if abs_e < EDGE_MIN * 100:
+        return "—", ""
     direction = "🟢 OVR" if lean == "OVER" else "🔴 UND"
-    e = min(abs(edge) * 100, 20.0)
-    if e >= 15: return "🔥 HOT", direction
-    if e >= 10: return "⚡ EDGE", direction
-    return "—", ""
+    if abs_e > EDGE_MAX * 100:
+        return "⚠️ SKIP", direction   # too big = model unreliable
+    # 10-15% sweet spot
+    return "⚡ EDGE", direction
 
 def fmt_edge(edge, has_signal):
     if not has_signal: return "—"
-    val = min(abs(edge) * 100, 20.0)
+    val = abs(edge) * 100
     sign = "+" if edge > 0 else ""
-    suffix = "!" if abs(edge) * 100 > 20 else ""
-    return f"{sign}{round(val, 1)}%{suffix}"
+    capped = min(val, 25.0)
+    suffix = "!" if val > EDGE_MAX * 100 else ""
+    return f"{sign}{round(capped, 1)}%{suffix}"
+
+# ── Two-gate decision ──
+def betting_decision(edge_pct_abs, conviction_tier):
+    """V5.3 two-gate rule: 10-15% edge AND HIGH/MED conviction → BET."""
+    in_sweet_spot = (EDGE_MIN * 100) <= edge_pct_abs <= (EDGE_MAX * 100)
+    good_conv = conviction_tier in ("HIGH", "MED")
+    if in_sweet_spot and good_conv:
+        return "✅ BET", "success"
+    if not in_sweet_spot and edge_pct_abs > EDGE_MAX * 100:
+        return "❌ SKIP — model unreliable (edge >15%)", "warning"
+    if not in_sweet_spot:
+        return "❌ SKIP — no edge", "info"
+    if not good_conv:
+        return "❌ SKIP — LOW conviction", "warning"
+    return "❌ SKIP", "info"
 
 # ── Signal boxes ──
 def signal_boxes(model_total, kalshi_line, price_cents, game_id, prefix,
-                 away, home, ap, hp, market_type, today):
+                 away, home, ap, hp, market_type, today, conviction):
     if not kalshi_line:
         st.warning("No Kalshi line loaded.")
         return
@@ -1006,51 +1116,46 @@ def signal_boxes(model_total, kalshi_line, price_cents, game_id, prefix,
     implied = price_cents / 100
     over_edge = (auto_prob / 100) - implied
     under_edge = (1 - auto_prob / 100) - (1 - implied)
+
     st.caption(
         f"Model: {prob_detail.get('final', 0)}% OVER | "
         f"Poisson: {prob_detail.get('poisson', 0)}% | "
         f"MC: {prob_detail.get('monte_carlo', 0)}% | "
-        f"Implied: {round(implied * 100, 1)}%"
+        f"Implied: {round(implied * 100, 1)}% | "
+        f"Conviction: {conviction['label']} ({conviction['score']}/8)"
     )
+
     col_o, col_u = st.columns(2)
-    with col_o:
-        e = round(over_edge * 100, 1)
-        if over_edge >= EDGE_THRESHOLD:
-            _, bet_amt = calc_kelly(over_edge)
-            st.success(f"OVER | Edge: +{e}% | Kelly: ${bet_amt}")
-            if supabase_connected:
-                placed = st.checkbox("Placed on Kalshi", key=f"placed_{prefix}_over_{game_id}")
-                if placed:
-                    real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
-                        value=float(bet_amt), step=1.0, key=f"real_{prefix}_over_{game_id}")
+    for direction, this_edge, col in [("OVER", over_edge, col_o), ("UNDER", under_edge, col_u)]:
+        with col:
+            e_pct = round(this_edge * 100, 1)
+            decision, severity = betting_decision(abs(e_pct), conviction["tier"])
+            should_offer = decision.startswith("✅")
+            label = f"{direction} | Edge: {'+' if this_edge >= 0 else ''}{e_pct}% | {decision}"
+            if should_offer:
+                _, bet_amt = calc_kelly(this_edge)
+                st.success(f"{label} | Kelly: ${bet_amt}")
+                if supabase_connected:
+                    placed = st.checkbox("Placed on Kalshi", key=f"placed_{prefix}_{direction}_{game_id}")
+                    if placed:
+                        real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
+                            value=float(bet_amt), step=1.0, key=f"real_{prefix}_{direction}_{game_id}")
+                    else:
+                        real_amt = None
+                    if st.button(f"Log {prefix} {direction}", key=f"log_{prefix}_{direction}_{game_id}"):
+                        if save_bet(today, away, home, ap, hp, model_total, kalshi_line,
+                                    price_cents, auto_prob, auto_prob, this_edge, direction,
+                                    bet_amt, market_type, game_id, placed, real_amt,
+                                    conviction_tier=conviction["tier"],
+                                    conviction_score=conviction["score"]):
+                            st.success("Logged!")
+            else:
+                if severity == "warning":
+                    st.warning(label)
+                elif severity == "success":
+                    st.success(label)
                 else:
-                    real_amt = None
-                if st.button(f"Log {prefix} OVER", key=f"log_{prefix}_over_{game_id}"):
-                    if save_bet(today, away, home, ap, hp, model_total, kalshi_line,
-                                price_cents, auto_prob, auto_prob, over_edge, "OVER",
-                                bet_amt, market_type, game_id, placed, real_amt):
-                        st.success("Logged!")
-        else:
-            st.info(f"OVER | Edge: {e}%")
-    with col_u:
-        e = round(under_edge * 100, 1)
-        if under_edge >= EDGE_THRESHOLD:
-            _, bet_amt = calc_kelly(under_edge)
-            st.success(f"UNDER | Edge: +{e}% | Kelly: ${bet_amt}")
-            if supabase_connected:
-                placed = st.checkbox("Placed on Kalshi", key=f"placed_{prefix}_under_{game_id}")
-                if placed:
-                    real_amt = st.number_input("Real $ amount", min_value=1.0, max_value=500.0,
-                        value=float(bet_amt), step=1.0, key=f"real_{prefix}_under_{game_id}")
-                else:
-                    real_amt = None
-                if st.button(f"Log {prefix} UNDER", key=f"log_{prefix}_under_{game_id}"):
-                    if save_bet(today, away, home, ap, hp, model_total, kalshi_line,
-                                price_cents, auto_prob, auto_prob, under_edge, "UNDER",
-                                bet_amt, market_type, game_id, placed, real_amt):
-                        st.success("Logged!")
-        else:
-            st.info(f"UNDER | Edge: {e}%")
+                    st.info(label)
 
 # ── Initialize live data ──
 _todays_umps = fetch_todays_umpires()
@@ -1075,14 +1180,21 @@ with st.sidebar:
     st.markdown("**Weather:** Open-Meteo (free)")
     st.markdown(f"**Umpires:** {'✅' if _todays_umps else '⚠️'} {len(_todays_umps)} games")
     st.markdown("---")
-    st.markdown("**V5.2 — Run Expectancy Model**")
+    st.markdown("### V5.3 Betting Rules")
+    st.markdown("**Two-gate system:**")
+    st.markdown(f"✅ BET: edge **{int(EDGE_MIN*100)}–{int(EDGE_MAX*100)}%** + 🔵/🟡 conviction")
+    st.markdown(f"❌ SKIP: edge **>{int(EDGE_MAX*100)}%** (unreliable)")
+    st.markdown("❌ SKIP: ⚪ LOW conviction")
+    st.markdown("---")
     st.caption(f"Baseline: {LEAGUE_AVG_RPG} RPG per team")
-    st.caption("ERA ratio scales runs up/down from baseline")
-    st.caption("Vegas shown as reference only")
-    st.caption(f"Edge threshold: {int(EDGE_THRESHOLD*100)}%")
+    st.caption("ERA ratio scales runs up/down")
+    st.caption("Conviction = 4-signal ensemble (max 8 pts)")
+    st.markdown("---")
+    st.markdown("**Validation Mode**")
+    st.caption("Track HIGH/MED/LOW miss vs actual nightly. Do not bet until HIGH conviction averages within 1.5 runs of actuals.")
 
 # ── Tabs ──
-tab1, tab2, tab3 = st.tabs(["Today's Games", "Settlement Tracker", "Calibration"])
+tab1, tab2, tab3, tab4 = st.tabs(["Today's Games", "Settlement Tracker", "Calibration", "Conviction Validation"])
 
 with tab1:
     if _settlement_msg:
@@ -1094,9 +1206,7 @@ with tab1:
         if not schedule:
             st.warning("No games scheduled today.")
         else:
-            # ── Sort by game time ──
             schedule = sorted(schedule, key=lambda g: g.get('game_datetime', ''))
-
             rows = []
             _row_errors = []
 
@@ -1115,15 +1225,11 @@ with tab1:
                     g_utc_hour = datetime.strptime(g['game_datetime'], '%Y-%m-%dT%H:%M:%SZ').hour
                     wx = fetch_stadium_weather(home, game_hour_utc=g_utc_hour)
 
-                    # Vegas — display only
                     _odds = match_odds(away, home, odds_lines)
                     _odds_f5 = match_odds(away, home, odds_f5_lines)
                     vegas_fg = float(_odds["total"]) if _odds else None
                     vegas_f5 = float(_odds_f5["total"]) if _odds_f5 else None
-                    vegas_fg_str = str(vegas_fg) if vegas_fg else "-"
-                    vegas_f5_str = str(vegas_f5) if vegas_f5 else "-"
 
-                    # Kalshi lines
                     _kf = match_kalshi(away, home, kalshi_lines, "full")
                     _k5 = match_kalshi(away, home, kalshi_lines, "f5")
                     kalshi_fg_line = float(_kf["line"]) if _kf else None
@@ -1131,21 +1237,22 @@ with tab1:
                     kalshi_fg_price = int(_kf["over_price_cents"]) if _kf else 50
                     kalshi_f5_price = int(_k5["over_price_cents"]) if _k5 else 50
 
-                    # V5.2: Run expectancy totals
                     adj_fg, fg_detail = calc_run_expectancy_fg(
                         away, home, ap, hp, wx, game_id, game_date)
                     adj_f5, f5_detail = calc_run_expectancy_f5(
                         away, home, ap, hp, wx, game_id, game_date)
 
-                    # Signals
                     fg_lean, fg_edge, fg_prob = calc_signal(adj_fg, kalshi_fg_line, kalshi_fg_price)
                     f5_lean, f5_edge, f5_prob = calc_signal(adj_f5, kalshi_f5_line, kalshi_f5_price)
+
+                    fg_conv = calc_conviction(fg_detail, fg_prob, vegas_fg, "full")
+                    f5_conv = calc_conviction(f5_detail, f5_prob, vegas_f5, "f5")
+
                     fg_sig, fg_dir = signal_label(fg_lean, fg_edge)
                     f5_sig, f5_dir = signal_label(f5_lean, f5_edge)
                     fg_has_sig = fg_sig != "—"
                     f5_has_sig = f5_sig != "—"
 
-                    # Conditions
                     if dome:
                         cond = "Dome"
                     else:
@@ -1173,16 +1280,18 @@ with tab1:
                         "Away": ap_abbr, "Home": hp_abbr, "Cond": cond,
                         "Mkt": "F5", "Model": str(adj_f5) if adj_f5 else "-",
                         "Kalshi": f"{kalshi_f5_line}{'v' if _k5 else '~'}" if kalshi_f5_line else "-",
-                        "Vegas": vegas_f5_str,
+                        "Vegas": str(vegas_f5) if vegas_f5 else "-",
                         "Edge": fmt_edge(f5_edge, f5_has_sig),
+                        "Conv": f5_conv["icon"],
                         "Sig": "—" if f5_sig == "—" else f"{f5_dir} {f5_sig}",
                     })
                     rows.append({
                         "Time": "", "Game": "", "Away": "", "Home": "", "Cond": "",
                         "Mkt": "FG", "Model": str(adj_fg) if adj_fg else "-",
                         "Kalshi": f"{kalshi_fg_line}{'v' if _kf else '~'}" if kalshi_fg_line else "-",
-                        "Vegas": vegas_fg_str,
+                        "Vegas": str(vegas_fg) if vegas_fg else "-",
                         "Edge": fmt_edge(fg_edge, fg_has_sig),
+                        "Conv": fg_conv["icon"],
                         "Sig": "—" if fg_sig == "—" else f"{fg_dir} {fg_sig}",
                     })
 
@@ -1219,23 +1328,23 @@ with tab1:
                     "Kalshi": st.column_config.TextColumn("Kalshi", width="small"),
                     "Vegas":  st.column_config.TextColumn("Vegas", width="small"),
                     "Edge":   st.column_config.TextColumn("Edge", width="small"),
+                    "Conv":   st.column_config.TextColumn("Conv", width="small"),
                     "Sig":    st.column_config.TextColumn("Sig", width="small"),
                 }
 
                 if view_type == "Mobile":
-                    mob_cols = ["Time", "Game", "Mkt", "Model", "Kalshi", "Vegas", "Edge", "Sig"]
+                    mob_cols = ["Time", "Game", "Mkt", "Model", "Kalshi", "Edge", "Conv", "Sig"]
                     st.dataframe(df_all[mob_cols].style.set_properties(**{'text-align': 'center'}),
                                  use_container_width=True, hide_index=True,
                                  column_config={k: col_cfg[k] for k in mob_cols})
                 else:
-                    desk_cols = ["Time", "Game", "Away", "Home", "Cond", "Mkt", "Model", "Kalshi", "Vegas", "Edge", "Sig"]
+                    desk_cols = ["Time", "Game", "Away", "Home", "Cond", "Mkt", "Model", "Kalshi", "Vegas", "Edge", "Conv", "Sig"]
                     st.dataframe(df_all[desk_cols].style.set_properties(**{'text-align': 'center'}),
                                  use_container_width=True, hide_index=True,
                                  column_config={k: col_cfg[k] for k in desk_cols})
 
                 st.markdown("---")
 
-            # ── Game Expanders — also sorted ──
             for g in schedule:
                 try:
                     if g.get('game_type', 'R') not in ('R', 'F', 'D', 'L', 'W'):
@@ -1266,6 +1375,12 @@ with tab1:
                         away, home, ap, hp, wx, game_id, game_date)
                     adj_f5, f5_detail = calc_run_expectancy_f5(
                         away, home, ap, hp, wx, game_id, game_date)
+
+                    f5_prob_d = model_to_prob_detail(adj_f5, kalshi_f5_line) if kalshi_f5_line else {"poisson": 50, "monte_carlo": 50, "final": 50}
+                    fg_prob_d = model_to_prob_detail(adj_fg, kalshi_fg_line) if kalshi_fg_line else {"poisson": 50, "monte_carlo": 50, "final": 50}
+
+                    fg_conv = calc_conviction(fg_detail, fg_prob_d, vegas_fg, "full")
+                    f5_conv = calc_conviction(f5_detail, f5_prob_d, vegas_f5, "f5")
 
                     with st.expander(f"**{away} @ {home}** — {et}"):
                         a_src = 'LIVE' if f5_detail.get('away_src') == 'live' else 'FB'
@@ -1305,12 +1420,15 @@ with tab1:
                         st.markdown("---")
 
                         # ── F5 ──
-                        st.markdown("**First 5 Innings**")
+                        st.markdown(f"**First 5 Innings** &nbsp; — &nbsp; Conviction: {f5_conv['label']} ({f5_conv['score']}/8)")
                         c1, c2, c3 = st.columns(3)
                         with c1: st.metric("Model F5", adj_f5)
                         with c2: st.metric("Kalshi F5", kalshi_f5_line or "—")
                         with c3: st.metric("Vegas F5", vegas_f5 or "—")
-                        with st.expander("F5 breakdown"):
+                        with st.expander("F5 conviction breakdown"):
+                            for sig in f5_conv["signals"]:
+                                st.caption(f"**{sig['name']}** ({sig['points']}/2): {sig['detail']}")
+                        with st.expander("F5 model breakdown"):
                             st.caption(f"Away scores (home SP ERA {f5_detail.get('home_era_adj','?')}): {f5_detail.get('away_runs',0):.2f} runs")
                             st.caption(f"Home scores (away SP ERA {f5_detail.get('away_era_adj','?')}): {f5_detail.get('home_runs',0):.2f} runs")
                             st.caption(f"Raw total: {f5_detail.get('raw_total','?')} | Park: {f5_detail.get('pf',1.0):.2f} | Ump: {f5_detail.get('ump_factor',1.0):.2f}")
@@ -1327,17 +1445,20 @@ with tab1:
                         f5_price_in = st.number_input("F5 Over Price (c)", 1, 99,
                             kalshi_f5_price, 1, key=f"f5p_{game_id}")
                         signal_boxes(adj_f5, f5_line_in, f5_price_in, game_id,
-                                    "F5", away, home, ap, hp, "f5", today)
+                                    "F5", away, home, ap, hp, "f5", today, f5_conv)
 
                         st.markdown("---")
 
                         # ── FG ──
-                        st.markdown("**Full Game**")
+                        st.markdown(f"**Full Game** &nbsp; — &nbsp; Conviction: {fg_conv['label']} ({fg_conv['score']}/8)")
                         c1, c2, c3 = st.columns(3)
                         with c1: st.metric("Model FG", adj_fg)
                         with c2: st.metric("Kalshi FG", kalshi_fg_line or "—")
                         with c3: st.metric("Vegas FG", vegas_fg or "—")
-                        with st.expander("FG breakdown"):
+                        with st.expander("FG conviction breakdown"):
+                            for sig in fg_conv["signals"]:
+                                st.caption(f"**{sig['name']}** ({sig['points']}/2): {sig['detail']}")
+                        with st.expander("FG model breakdown"):
                             st.caption(f"Away scores: {fg_detail.get('away_runs',0):.2f} runs")
                             st.caption(f"  SP (home ERA {fg_detail.get('home_era_adj','?')}): {fg_detail.get('away_sp_runs',0):.2f}")
                             st.caption(f"  BP (home BP ERA {fg_detail.get('home_bp_era','?')}): {fg_detail.get('away_bp_runs',0):.2f}")
@@ -1358,7 +1479,7 @@ with tab1:
                         fg_price_in = st.number_input("FG Over Price (c)", 1, 99,
                             kalshi_fg_price, 1, key=f"fgp_{game_id}")
                         signal_boxes(adj_fg, fg_line_in, fg_price_in, game_id,
-                                    "FG", away, home, ap, hp, "full", today)
+                                    "FG", away, home, ap, hp, "full", today, fg_conv)
 
                 except Exception as ge:
                     st.warning(f"Could not load game: {ge}")
@@ -1410,6 +1531,9 @@ with tab2:
 
                     base_cols = ["game_date", "away_team", "home_team", "market_type",
                                  "model_total", "kalshi_line", "bet_direction", "bet_amount"]
+                    # Add conviction columns if present
+                    if "conviction_tier" in df.columns:
+                        base_cols.append("conviction_tier")
                     if view_mode == "Real Kalshi Bets Only":
                         base_cols.append("real_amount")
                         if all(c in df.columns for c in ["real_amount", "profit_loss", "bet_amount"]):
@@ -1484,6 +1608,18 @@ with tab3:
                                 st.markdown(f"**{direction}:** {w}W-{l}L ({wr}%) | P&L: ${pnl:+.2f}")
                     st.markdown("---")
 
+                    if "conviction_tier" in settled.columns:
+                        st.markdown("**By Conviction Tier**")
+                        for tier in ["HIGH", "MED", "LOW"]:
+                            subset = settled[settled["conviction_tier"] == tier]
+                            if len(subset) > 0:
+                                w = (subset["result"] == "WIN").sum()
+                                l = (subset["result"] == "LOSS").sum()
+                                wr = round(w/(w+l)*100, 1) if (w+l) > 0 else 0
+                                pnl = round(subset["profit_loss"].sum(), 2)
+                                st.markdown(f"**{tier}:** {w}W-{l}L ({wr}%) | P&L: ${pnl:+.2f}")
+                        st.markdown("---")
+
                     if actual_win_rate > 58:
                         st.success(f"{actual_win_rate}% — consider increasing sizing")
                     elif actual_win_rate > 53:
@@ -1498,5 +1634,93 @@ with tab3:
                 st.info("No settled bets yet.")
         except Exception as e:
             st.error(f"Calibration error: {e}")
+    else:
+        st.warning("Supabase not connected.")
+
+with tab4:
+    st.markdown("**Conviction Validation — Today's Slate**")
+    st.caption("Each night, compare model totals to actual final scores by conviction tier. "
+               "If HIGH conviction games average within ±1.5 runs of actual and LOW conviction games "
+               "are wider, the conviction logic is working.")
+    st.markdown("---")
+
+    if supabase_connected:
+        try:
+            today = today_et()
+            schedule = statsapi.schedule(date=today)
+            schedule = sorted(schedule, key=lambda g: g.get('game_datetime', ''))
+            val_rows = []
+            for g in schedule:
+                if g.get('game_type', 'R') not in ('R', 'F', 'D', 'L', 'W'):
+                    continue
+                try:
+                    home, away = g['home_name'], g['away_name']
+                    hp = g.get('home_probable_pitcher', 'TBD')
+                    ap = g.get('away_probable_pitcher', 'TBD')
+                    game_id = str(g['game_id'])
+                    g_utc_hour = datetime.strptime(g['game_datetime'], '%Y-%m-%dT%H:%M:%SZ').hour
+                    wx = fetch_stadium_weather(home, game_hour_utc=g_utc_hour)
+
+                    _odds = match_odds(away, home, odds_lines)
+                    _odds_f5 = match_odds(away, home, odds_f5_lines)
+                    vegas_fg = float(_odds["total"]) if _odds else None
+                    vegas_f5 = float(_odds_f5["total"]) if _odds_f5 else None
+
+                    _kf = match_kalshi(away, home, kalshi_lines, "full")
+                    _k5 = match_kalshi(away, home, kalshi_lines, "f5")
+                    kalshi_fg_line = float(_kf["line"]) if _kf else None
+                    kalshi_f5_line = float(_k5["line"]) if _k5 else None
+
+                    adj_fg, fg_detail = calc_run_expectancy_fg(away, home, ap, hp, wx, game_id, today)
+                    adj_f5, f5_detail = calc_run_expectancy_f5(away, home, ap, hp, wx, game_id, today)
+
+                    f5_prob = model_to_prob_detail(adj_f5, kalshi_f5_line) if kalshi_f5_line else {"poisson": 50, "monte_carlo": 50, "final": 50}
+                    fg_prob = model_to_prob_detail(adj_fg, kalshi_fg_line) if kalshi_fg_line else {"poisson": 50, "monte_carlo": 50, "final": 50}
+                    fg_conv = calc_conviction(fg_detail, fg_prob, vegas_fg, "full")
+                    f5_conv = calc_conviction(f5_detail, f5_prob, vegas_f5, "f5")
+
+                    score = fetch_final_score(game_id=int(game_id))
+                    actual_total = score[2] if score else None
+
+                    val_rows.append({
+                        "Game": f"{abbrev_team(away)}@{abbrev_team(home)}",
+                        "Mkt": "F5",
+                        "Model": adj_f5,
+                        "Actual": actual_total if actual_total else "—",
+                        "Miss": round(adj_f5 - actual_total, 1) if actual_total else "—",
+                        "Conv": f5_conv["label"],
+                        "Score": f"{f5_conv['score']}/8",
+                    })
+                    val_rows.append({
+                        "Game": f"{abbrev_team(away)}@{abbrev_team(home)}",
+                        "Mkt": "FG",
+                        "Model": adj_fg,
+                        "Actual": actual_total if actual_total else "—",
+                        "Miss": round(adj_fg - actual_total, 1) if actual_total else "—",
+                        "Conv": fg_conv["label"],
+                        "Score": f"{fg_conv['score']}/8",
+                    })
+                except Exception:
+                    continue
+
+            if val_rows:
+                df_val = pd.DataFrame(val_rows)
+                st.dataframe(df_val.style.set_properties(**{'text-align': 'center'}),
+                             use_container_width=True, hide_index=True)
+
+                st.markdown("---")
+                st.markdown("**Tier averages (today, settled games only)**")
+                settled_today = [r for r in val_rows if isinstance(r.get("Miss"), (int, float))]
+                for tier_label in ["🔵 HIGH", "🟡 MED", "⚪ LOW"]:
+                    subset = [r for r in settled_today if r["Conv"] == tier_label]
+                    if subset:
+                        avg_miss = round(sum(abs(r["Miss"]) for r in subset) / len(subset), 2)
+                        st.markdown(f"**{tier_label}:** {len(subset)} games, avg miss {avg_miss} runs")
+                    else:
+                        st.caption(f"{tier_label}: no settled games yet today")
+            else:
+                st.info("No games on slate today.")
+        except Exception as e:
+            st.error(f"Validation error: {e}")
     else:
         st.warning("Supabase not connected.")
