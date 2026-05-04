@@ -92,7 +92,7 @@ st.markdown(f"""
     <div class="mph-sub">Surface Elo + Form + H2H + Shadow Validation &nbsp;<span class="pill-live">&#9679; LIVE</span></div>
   </div>
   <div style="text-align:right">
-    <div class="mph-badge">V1.0</div>
+    <div class="mph-badge">V1.1</div>
     <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y &middot; %-I:%M %p ET')}</div>
   </div>
 </div>
@@ -100,7 +100,7 @@ st.markdown(f"""
 
 # ── Constants ──
 BANKROLL = 500
-EDGE_MIN = 0.05      # Tennis edges run smaller than MLB totals — 5-12% sweet spot
+EDGE_MIN = 0.05
 EDGE_MAX = 0.12
 KELLY_FRACTION = 0.5
 MAX_BET_PCT = 0.05
@@ -129,10 +129,42 @@ def get_secret(key):
     except Exception: pass
     return ""
 
+# ─── NAME NORMALIZATION ───────────────────────────────────────────────────
+# Tennis player names are inconsistent across sources:
+#   Sackmann: "Jannik Sinner"
+#   API-Odds: "jannik sinner" (lowercase)
+#   Kalshi:   "Sinner" (last name only) or "Sinner vs Zverev"
+# We normalize for matching but preserve display names.
+
+def normalize_name(name):
+    """Lowercase, strip whitespace, remove diacritics-ish, single spaces."""
+    if not name: return ""
+    return " ".join(name.lower().strip().split())
+
+def last_name(name):
+    """Extract last name for fuzzy matching."""
+    parts = normalize_name(name).split()
+    return parts[-1] if parts else ""
+
+def names_match(a, b):
+    """True if two names plausibly refer to the same person."""
+    if not a or not b: return False
+    na, nb = normalize_name(a), normalize_name(b)
+    if na == nb: return True
+    if na in nb or nb in na: return True
+    if last_name(a) == last_name(b) and last_name(a):
+        return True
+    return False
+
+def display_name(name):
+    """Title-case for display."""
+    if not name: return ""
+    return " ".join(w.capitalize() for w in name.split())
+
 # ─── ELO STATE (loaded from Supabase, cached per session) ──────────────────
 @st.cache_data(ttl=300)
 def load_player_elos():
-    """Load all player Elo ratings from Supabase. Returns dicts keyed by player name."""
+    """Load all player Elo ratings. Returns dicts keyed by 'TOUR|name_lower'."""
     if not supabase_connected:
         return {}, {"Hard": {}, "Clay": {}, "Grass": {}}
     try:
@@ -140,9 +172,9 @@ def load_player_elos():
         overall = {}
         surface = {"Hard": {}, "Clay": {}, "Grass": {}}
         for r in rows:
-            name = r.get("player_name")
+            name = r.get("player_name", "")
             tour = r.get("tour", "ATP")
-            key = f"{tour}|{name}"
+            key = f"{tour}|{normalize_name(name)}"
             overall[key] = float(r.get("elo_overall", INITIAL_ELO))
             surface["Hard"][key] = float(r.get("elo_hard", INITIAL_ELO))
             surface["Clay"][key] = float(r.get("elo_clay", INITIAL_ELO))
@@ -152,39 +184,37 @@ def load_player_elos():
         return {}, {"Hard": {}, "Clay": {}, "Grass": {}}
 
 @st.cache_data(ttl=300)
-def load_recent_form(player_key, n=RECENT_FORM_WINDOW):
-    """Load player's last N match results. Returns list of 1/0."""
+def load_recent_form(tour, player_name, n=RECENT_FORM_WINDOW):
+    """Load player's last N match results from history. Returns list of 1/0."""
     if not supabase_connected: return []
     try:
-        tour, name = player_key.split("|", 1)
-        rows = (supabase.table("tennis_match_results")
-                .select("winner_name, loser_name, match_date")
-                .or_(f"winner_name.eq.{name},loser_name.eq.{name}")
-                .eq("tour", tour)
-                .order("match_date", desc=True)
-                .limit(n).execute().data or [])
-        results = []
-        for r in rows:
-            results.append(1 if r.get("winner_name") == name else 0)
-        return results
+        # Two queries: as winner, as loser. Merge by date, take last N.
+        wins = (supabase.table("tennis_match_results")
+                .select("match_date")
+                .eq("tour", tour).eq("winner_name", player_name)
+                .order("match_date", desc=True).limit(n).execute().data or [])
+        losses = (supabase.table("tennis_match_results")
+                  .select("match_date")
+                  .eq("tour", tour).eq("loser_name", player_name)
+                  .order("match_date", desc=True).limit(n).execute().data or [])
+        all_matches = [(r["match_date"], 1) for r in wins] + [(r["match_date"], 0) for r in losses]
+        all_matches.sort(key=lambda x: x[0], reverse=True)
+        return [r[1] for r in all_matches[:n]]
     except Exception:
         return []
 
 @st.cache_data(ttl=300)
-def load_h2h(p1_key, p2_key):
-    """Get head-to-head record between two players."""
+def load_h2h(tour, p1_name, p2_name):
+    """Get head-to-head record between two players. Returns (p1_wins, p2_wins)."""
     if not supabase_connected: return (0, 0)
     try:
-        tour1, n1 = p1_key.split("|", 1)
-        _, n2 = p2_key.split("|", 1)
-        rows1 = (supabase.table("tennis_match_results")
-                 .select("winner_name")
-                 .eq("tour", tour1)
-                 .or_(f"and(winner_name.eq.{n1},loser_name.eq.{n2}),and(winner_name.eq.{n2},loser_name.eq.{n1})")
-                 .execute().data or [])
-        p1_wins = sum(1 for r in rows1 if r.get("winner_name") == n1)
-        p2_wins = sum(1 for r in rows1 if r.get("winner_name") == n2)
-        return (p1_wins, p2_wins)
+        r1 = (supabase.table("tennis_match_results").select("id")
+              .eq("tour", tour).eq("winner_name", p1_name).eq("loser_name", p2_name)
+              .execute().data or [])
+        r2 = (supabase.table("tennis_match_results").select("id")
+              .eq("tour", tour).eq("winner_name", p2_name).eq("loser_name", p1_name)
+              .execute().data or [])
+        return (len(r1), len(r2))
     except Exception:
         return (0, 0)
 
@@ -194,23 +224,23 @@ def get_blended_elo(player_key, surface, overall_elos, surface_elos):
     surf = surface_elos.get(surface, {}).get(player_key, INITIAL_ELO)
     return SURFACE_WEIGHT * surf + (1 - SURFACE_WEIGHT) * overall
 
-def predict_match(p1_key, p2_key, surface, overall_elos, surface_elos):
-    """Return P(p1 beats p2) and detail dict."""
+def predict_match(tour, p1_display, p2_display, surface, overall_elos, surface_elos):
+    """Return (P(p1 beats p2), detail dict). Names handled case-insensitively."""
+    p1_key = f"{tour}|{normalize_name(p1_display)}"
+    p2_key = f"{tour}|{normalize_name(p2_display)}"
+
     e1 = get_blended_elo(p1_key, surface, overall_elos, surface_elos)
     e2 = get_blended_elo(p2_key, surface, overall_elos, surface_elos)
 
-    form1 = load_recent_form(p1_key)
-    form2 = load_recent_form(p2_key)
+    form1 = load_recent_form(tour, p1_display)
+    form2 = load_recent_form(tour, p2_display)
     f1_pct = sum(form1) / len(form1) if form1 else 0.5
     f2_pct = sum(form2) / len(form2) if form2 else 0.5
     form_adj = (f1_pct - f2_pct) * 30
 
-    h2h_p1, h2h_p2 = load_h2h(p1_key, p2_key)
+    h2h_p1, h2h_p2 = load_h2h(tour, p1_display, p2_display)
     h2h_total = h2h_p1 + h2h_p2
-    if h2h_total >= 3:
-        h2h_adj = (h2h_p1 - h2h_p2) * 8
-    else:
-        h2h_adj = 0
+    h2h_adj = (h2h_p1 - h2h_p2) * 8 if h2h_total >= 3 else 0
 
     diff = (e1 - e2) + form_adj + h2h_adj
     p1_prob = 1 / (1 + 10 ** (-diff / 400))
@@ -231,18 +261,19 @@ def predict_match(p1_key, p2_key, surface, overall_elos, surface_elos):
         "h2h_p2": h2h_p2,
         "h2h_adj": round(h2h_adj, 1),
         "surface": surface,
+        "elo_data_present": (p1_key in overall_elos) and (p2_key in overall_elos),
     }
 
 # ─── CONVICTION ────────────────────────────────────────────────────────────
 def score_elo_gap(detail):
-    """Bigger Elo gaps are more confident predictions."""
     diff = abs(detail.get("elo_diff", 0))
     if diff >= 150: return 2, f"Elo gap: {diff:.0f} (decisive)"
     if diff >= 75: return 1, f"Elo gap: {diff:.0f} (moderate)"
     return 0, f"Elo gap: {diff:.0f} (small)"
 
 def score_surface_specialization(detail):
-    """Reward when surface-specific Elo confirms the favorite."""
+    if not detail.get("elo_data_present"):
+        return 0, "Surface: insufficient Elo data"
     p1_surf = detail.get("p1_elo_surface", INITIAL_ELO)
     p2_surf = detail.get("p2_elo_surface", INITIAL_ELO)
     p1_overall = detail.get("p1_elo_overall", INITIAL_ELO)
@@ -258,7 +289,6 @@ def score_surface_specialization(detail):
     return 0, f"Surface conflicts with overall ({detail['surface']})"
 
 def score_form_alignment(detail):
-    """Reward when recent form aligns with Elo favorite."""
     p1_form_n = detail.get("p1_form_n", 0)
     p2_form_n = detail.get("p2_form_n", 0)
     if p1_form_n < 5 or p2_form_n < 5:
@@ -274,7 +304,6 @@ def score_form_alignment(detail):
     return 0, f"Form: {f1*100:.0f}% vs {f2*100:.0f}% (conflict)"
 
 def score_h2h(detail):
-    """Reward when H2H sample is meaningful and aligns."""
     h2h_p1 = detail.get("h2h_p1", 0)
     h2h_p2 = detail.get("h2h_p2", 0)
     total = h2h_p1 + h2h_p2
@@ -324,12 +353,12 @@ def fetch_kalshi_tennis_lines():
         result = {}
         for row in rows:
             tour = (row.get("tour") or "ATP").upper()
-            p1 = (row.get("player1") or "").lower()
-            p2 = (row.get("player2") or "").lower()
+            p1 = normalize_name(row.get("player1") or "")
+            p2 = normalize_name(row.get("player2") or "")
             if not p1 or not p2: continue
             result[(tour, p1, p2)] = {
-                "p1_yes_cents": int(row.get("p1_yes_cents", 50)),
-                "p2_yes_cents": int(row.get("p2_yes_cents", 50)),
+                "p1_yes_cents": int(row.get("p1_yes_cents") or 50),
+                "p2_yes_cents": int(row.get("p2_yes_cents") or 50),
                 "ticker": row.get("ticker", ""),
                 "tournament": row.get("tournament", ""),
                 "round": row.get("round", ""),
@@ -342,14 +371,70 @@ def fetch_kalshi_tennis_lines():
     except Exception as e:
         return {"**error**": str(e)}
 
-# ─── ODDS API (tennis) ─────────────────────────────────────────────────────
+# ─── ODDS API (tennis) — DYNAMIC TOURNAMENT DISCOVERY ─────────────────────
+# Tennis sport keys are PER TOURNAMENT and only active during the tournament.
+# We discover what's currently active each session.
+TENNIS_PREFIXES = ("tennis_atp", "tennis_wta")
+
+def _classify_tour(sport_key):
+    if sport_key.startswith("tennis_atp"): return "ATP"
+    if sport_key.startswith("tennis_wta"): return "WTA"
+    return None
+
+def _infer_surface_from_key(sport_key, sport_title):
+    """Best-effort surface inference from tournament name."""
+    text = (sport_key + " " + (sport_title or "")).lower()
+    clay_keywords = ["french", "roland", "madrid", "rome", "italian", "monte carlo",
+                     "barcelona", "hamburg", "estoril", "munich", "buenos_aires",
+                     "rio", "houston", "geneva", "lyon", "bastad", "kitzbuhel"]
+    grass_keywords = ["wimbledon", "queens", "halle", "stuttgart", "eastbourne",
+                      "newport", "hertogenbosch", "majorca"]
+    for c in clay_keywords:
+        if c.replace("_", " ") in text or c.replace(" ", "_") in text or c in text:
+            return "Clay"
+    for g in grass_keywords:
+        if g in text: return "Grass"
+    return "Hard"
+
+@st.cache_data(ttl=600)
+def discover_active_tennis_keys():
+    """Returns list of (sport_key, tour, surface, sport_title) for active tennis events."""
+    api_key = get_secret("ODDS_API_KEY")
+    if not api_key: return []
+    try:
+        resp = requests.get("https://api.the-odds-api.com/v4/sports/",
+                            params={"apiKey": api_key}, timeout=10)
+        if resp.status_code != 200: return []
+        sports = resp.json()
+        result = []
+        for s in sports:
+            key = s.get("key", "")
+            if not key.startswith(TENNIS_PREFIXES): continue
+            if not s.get("active", False): continue
+            tour = _classify_tour(key)
+            if not tour: continue
+            title = s.get("title", "")
+            surface = _infer_surface_from_key(key, title)
+            result.append({"key": key, "tour": tour, "surface": surface, "title": title})
+        return result
+    except Exception:
+        return []
+
 @st.cache_data(ttl=300)
 def fetch_oddsapi_tennis():
-    """Pull tennis odds from API-Odds. Returns dict keyed by (tour, p1_lower, p2_lower)."""
+    """Pull tennis odds across all currently active tournaments.
+    Returns dict keyed by (tour, p1_lower, p2_lower)."""
     api_key = get_secret("ODDS_API_KEY")
-    if not api_key: return {}
+    if not api_key: return {}, []
+    active = discover_active_tennis_keys()
+    if not active: return {}, []
+
     result = {}
-    for sport_key, tour in [("tennis_atp", "ATP"), ("tennis_wta", "WTA")]:
+    for entry in active:
+        sport_key = entry["key"]
+        tour = entry["tour"]
+        surface = entry["surface"]
+        tournament = entry["title"]
         try:
             resp = requests.get(
                 f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/",
@@ -358,73 +443,36 @@ def fetch_oddsapi_tennis():
                         "dateFormat": "iso"}, timeout=10)
             if resp.status_code != 200: continue
             for game in resp.json():
-                p1 = game.get("home_team", "").lower()
-                p2 = game.get("away_team", "").lower()
-                # Take median price across books
+                p1 = normalize_name(game.get("home_team", ""))
+                p2 = normalize_name(game.get("away_team", ""))
+                if not p1 or not p2: continue
                 p1_prices, p2_prices = [], []
                 for bm in game.get("bookmakers", []):
                     for mkt in bm.get("markets", []):
                         if mkt.get("key") != "h2h": continue
                         for oc in mkt.get("outcomes", []):
-                            if oc["name"].lower() == p1:
+                            on = normalize_name(oc.get("name", ""))
+                            if on == p1:
                                 p1_prices.append(oc["price"])
-                            elif oc["name"].lower() == p2:
+                            elif on == p2:
                                 p2_prices.append(oc["price"])
                 if p1_prices and p2_prices:
                     p1_dec = sorted(p1_prices)[len(p1_prices)//2]
                     p2_dec = sorted(p2_prices)[len(p2_prices)//2]
-                    p1_implied = 1 / p1_dec
-                    p2_implied = 1 / p2_dec
                     result[(tour, p1, p2)] = {
-                        "p1_implied": round(p1_implied, 4),
-                        "p2_implied": round(p2_implied, 4),
+                        "p1_implied": round(1 / p1_dec, 4),
+                        "p2_implied": round(1 / p2_dec, 4),
                         "p1_decimal": p1_dec,
                         "p2_decimal": p2_dec,
                         "commence_time": game.get("commence_time", ""),
+                        "tournament": tournament,
+                        "surface": surface,
                     }
         except Exception:
             continue
-    return result
-
-def match_oddsapi(tour, p1, p2, odds_dict):
-    """Find odds for a player pair in either order."""
-    p1l, p2l = p1.lower(), p2.lower()
-    for (t, k1, k2), data in odds_dict.items():
-        if t != tour: continue
-        if (k1 in p1l or p1l in k1) and (k2 in p2l or p2l in k2):
-            return data, False  # not flipped
-        if (k1 in p2l or p2l in k1) and (k2 in p1l or p1l in k2):
-            # Players in opposite order — flip
-            return {
-                "p1_implied": data["p2_implied"],
-                "p2_implied": data["p1_implied"],
-                "p1_decimal": data["p2_decimal"],
-                "p2_decimal": data["p1_decimal"],
-                "commence_time": data.get("commence_time", ""),
-            }, True
-    return None, False
+    return result, active
 
 # ─── MATCH SCHEDULE FROM API-ODDS ──────────────────────────────────────────
-def fetch_todays_matches():
-    """Build today's match list from API-Odds (since it covers every tournament)."""
-    odds = fetch_oddsapi_tennis()
-    matches = []
-    today_str = today_et()
-    for (tour, p1, p2), data in odds.items():
-        commence = data.get("commence_time", "")
-        if commence and commence[:10] != today_str:
-            continue
-        matches.append({
-            "tour": tour, "p1": p1, "p2": p2,
-            "p1_implied": data["p1_implied"],
-            "p2_implied": data["p2_implied"],
-            "p1_decimal": data["p1_decimal"],
-            "p2_decimal": data["p2_decimal"],
-            "commence_time": commence,
-            "match_time_et": _parse_et(commence),
-        })
-    return sorted(matches, key=lambda m: m.get("commence_time", ""))
-
 def _parse_et(iso_str):
     if not iso_str: return ""
     try:
@@ -434,22 +482,55 @@ def _parse_et(iso_str):
     except Exception:
         return ""
 
-def kalshi_to_implied(yes_cents):
-    """Convert Kalshi YES price to implied probability."""
-    return yes_cents / 100
+def fetch_todays_matches(odds_data):
+    """Build today's match list from already-fetched odds data.
+    Includes matches commencing today OR within the next 36 hours
+    (tennis has matches at 5am ET in Europe that are 'today' over there)."""
+    matches = []
+    now = datetime.utcnow()
+    cutoff = now + timedelta(hours=36)
+    for (tour, p1, p2), data in odds_data.items():
+        commence = data.get("commence_time", "")
+        try:
+            if commence:
+                ct = datetime.strptime(commence.replace("Z", ""), "%Y-%m-%dT%H:%M:%S")
+                if ct < now - timedelta(hours=1) or ct > cutoff:
+                    continue
+        except Exception:
+            pass
+        matches.append({
+            "tour": tour, "p1": p1, "p2": p2,
+            "p1_implied": data["p1_implied"],
+            "p2_implied": data["p2_implied"],
+            "p1_decimal": data["p1_decimal"],
+            "p2_decimal": data["p2_decimal"],
+            "commence_time": commence,
+            "match_time_et": _parse_et(commence),
+            "tournament": data.get("tournament", ""),
+            "surface": data.get("surface", "Hard"),
+        })
+    return sorted(matches, key=lambda m: m.get("commence_time", ""))
 
-def implied_to_decimal(implied):
-    return 1 / implied if implied > 0 else 0
-
-# ─── KALSHI MATCHING ───────────────────────────────────────────────────────
+# ─── KALSHI MATCHING (fuzzy on last name) ──────────────────────────────────
 def match_kalshi(tour, p1, p2, kalshi_lines):
     """Find Kalshi line for a player pair in either order."""
-    p1l, p2l = p1.lower(), p2.lower()
+    p1_last = last_name(p1)
+    p2_last = last_name(p2)
     for (t, k1, k2), data in kalshi_lines.items():
         if t != tour: continue
-        if (k1 in p1l or p1l in k1) and (k2 in p2l or p2l in k2):
+        k1_last = last_name(k1)
+        k2_last = last_name(k2)
+        if (names_match(p1, k1) and names_match(p2, k2)):
             return data, False
-        if (k1 in p2l or p2l in k1) and (k2 in p1l or p1l in k2):
+        if (names_match(p1, k2) and names_match(p2, k1)):
+            flipped = dict(data)
+            flipped["p1_yes_cents"] = data["p2_yes_cents"]
+            flipped["p2_yes_cents"] = data["p1_yes_cents"]
+            return flipped, True
+        # Last-name fallback for cases like Kalshi using "Sinner" only
+        if p1_last == k1_last and p2_last == k2_last and p1_last and p2_last:
+            return data, False
+        if p1_last == k2_last and p2_last == k1_last and p1_last and p2_last:
             flipped = dict(data)
             flipped["p1_yes_cents"] = data["p2_yes_cents"]
             flipped["p2_yes_cents"] = data["p1_yes_cents"]
@@ -458,15 +539,12 @@ def match_kalshi(tour, p1, p2, kalshi_lines):
 
 # ─── BETTING DECISIONS ─────────────────────────────────────────────────────
 def calc_signal(model_p1_prob, kalshi_p1_yes_cents):
-    """Compare model probability to Kalshi YES price for player 1."""
     if not kalshi_p1_yes_cents or not model_p1_prob:
-        return "EVEN", 0.0, "EVEN", 0.0
+        return 0.0, 0.0
     implied_p1 = kalshi_p1_yes_cents / 100
     edge_p1 = model_p1_prob - implied_p1
     edge_p2 = (1 - model_p1_prob) - (1 - implied_p1)
-    p1_lean = "BUY P1" if edge_p1 > 0 else "EVEN"
-    p2_lean = "BUY P2" if edge_p2 > 0 else "EVEN"
-    return p1_lean, edge_p1, p2_lean, edge_p2
+    return edge_p1, edge_p2
 
 def betting_decision(edge_pct_abs, conviction_tier):
     in_sweet_spot = (EDGE_MIN * 100) <= edge_pct_abs <= (EDGE_MAX * 100)
@@ -493,50 +571,6 @@ def fmt_edge(edge):
     suffix = "!" if val > EDGE_MAX * 100 else ""
     return f"{sign}{round(capped, 1)}%{suffix}"
 
-# ─── ELO UPDATE (after match settles) ──────────────────────────────────────
-def update_elo_after_match(tour, winner, loser, surface):
-    """Update player Elos in Supabase after match settles."""
-    if not supabase_connected: return False
-    try:
-        winner_key = f"{tour}|{winner}"
-        loser_key = f"{tour}|{loser}"
-        # Fetch current ratings
-        w_rows = (supabase.table("tennis_player_elos").select("*")
-                  .eq("tour", tour).eq("player_name", winner).execute().data or [])
-        l_rows = (supabase.table("tennis_player_elos").select("*")
-                  .eq("tour", tour).eq("player_name", loser).execute().data or [])
-        w_overall = float(w_rows[0]["elo_overall"]) if w_rows else INITIAL_ELO
-        l_overall = float(l_rows[0]["elo_overall"]) if l_rows else INITIAL_ELO
-        w_surf_col = f"elo_{surface.lower()}"
-        w_surf = float(w_rows[0][w_surf_col]) if w_rows else INITIAL_ELO
-        l_surf = float(l_rows[0][w_surf_col]) if l_rows else INITIAL_ELO
-        # Overall
-        exp_w = 1 / (1 + 10 ** ((l_overall - w_overall) / 400))
-        new_w_overall = w_overall + K_FACTOR * (1 - exp_w)
-        new_l_overall = l_overall + K_FACTOR * (0 - (1 - exp_w))
-        # Surface
-        exp_w_s = 1 / (1 + 10 ** ((l_surf - w_surf) / 400))
-        new_w_surf = w_surf + K_FACTOR * (1 - exp_w_s)
-        new_l_surf = l_surf + K_FACTOR * (0 - (1 - exp_w_s))
-        # Build update payload (preserve other surface ratings)
-        def upsert_row(name, rows, new_overall, surface_col, new_surf):
-            base = {
-                "tour": tour, "player_name": name,
-                "elo_overall": round(new_overall, 1),
-                "elo_hard": float(rows[0]["elo_hard"]) if rows else INITIAL_ELO,
-                "elo_clay": float(rows[0]["elo_clay"]) if rows else INITIAL_ELO,
-                "elo_grass": float(rows[0]["elo_grass"]) if rows else INITIAL_ELO,
-                "updated_at": datetime.utcnow().isoformat(),
-            }
-            base[surface_col] = round(new_surf, 1)
-            supabase.table("tennis_player_elos").upsert(base, on_conflict="tour,player_name").execute()
-        upsert_row(winner, w_rows, new_w_overall, w_surf_col, new_w_surf)
-        upsert_row(loser, l_rows, new_l_overall, w_surf_col, new_l_surf)
-        return True
-    except Exception as e:
-        st.error(f"Elo update error: {e}")
-        return False
-
 # ─── SHADOW VALIDATION ─────────────────────────────────────────────────────
 def shadow_log_match(match_date, tour, p1, p2, surface, model_p1_prob,
                      kalshi_p1_cents, oddsapi_p1_implied, conviction_tier,
@@ -549,7 +583,7 @@ def shadow_log_match(match_date, tour, p1, p2, surface, model_p1_prob,
         if existing:
             row = existing[0]
             if row.get("winner_name"):
-                return True  # already settled
+                return True
             supabase.table("tennis_shadow_validation").update({
                 "model_p1_prob": round(model_p1_prob, 4),
                 "kalshi_p1_cents": kalshi_p1_cents,
@@ -600,9 +634,9 @@ def save_bet(match_date, tour, p1, p2, surface, model_prob, kalshi_cents,
 # ─── INIT ────────────────────────────────────────────────────────────────
 overall_elos, surface_elos = load_player_elos()
 kalshi_lines = fetch_kalshi_tennis_lines()
-oddsapi_data = fetch_oddsapi_tennis()
+oddsapi_data, active_tournaments = fetch_oddsapi_tennis()
 _kalshi_error = kalshi_lines.pop("**error**", None) if isinstance(kalshi_lines, dict) else None
-todays_matches = fetch_todays_matches()
+todays_matches = fetch_todays_matches(oddsapi_data)
 
 # ─── SIDEBAR ──────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -612,18 +646,19 @@ with st.sidebar:
     st.markdown(f"**Odds API:** {'✅ Loaded' if _odds_key else '❌ Missing'}")
     if _odds_key: st.caption(f"Prefix: {_odds_key[:6]}...")
     st.markdown(f"**Kalshi tennis:** {'✅' if kalshi_lines else '⚠️'} {len(kalshi_lines)} lines")
-    st.markdown(f"**Player Elo ratings:** {len(overall_elos)} players")
+    st.markdown(f"**Player Elos:** {len(overall_elos)} players")
+    st.markdown(f"**Active tournaments:** {len(active_tournaments)}")
+    if active_tournaments:
+        for t in active_tournaments:
+            st.caption(f"• {t['title']} ({t['surface']})")
     st.markdown("---")
-    st.markdown("### V1.0 Betting Rules")
+    st.markdown("### V1.1 Betting Rules")
     st.markdown(f"✅ BET: edge **{int(EDGE_MIN*100)}–{int(EDGE_MAX*100)}%** + 🔵/🟡 conviction")
     st.markdown(f"❌ SKIP: edge **>{int(EDGE_MAX*100)}%** (unreliable)")
     st.markdown("❌ SKIP: ⚪ LOW conviction")
     st.markdown("---")
     st.caption("Surface Elo blend: 70% surface, 30% overall")
-    st.caption("Conviction: 4-signal ensemble (Elo gap, surface, form, H2H)")
-    st.markdown("---")
-    st.markdown("**Shadow Validation**")
-    st.caption("Every match auto-logs. Build calibration over weeks.")
+    st.caption("Conviction: 4-signal ensemble")
     st.markdown("---")
     if st.button("🔄 Refresh data"):
         st.cache_data.clear()
@@ -633,21 +668,29 @@ with st.sidebar:
 tab1, tab2, tab3, tab4 = st.tabs(["Today's Matches", "Settlement Tracker", "Calibration", "Shadow Validation"])
 
 with tab1:
-    if not todays_matches:
-        st.warning("No matches loaded. Check Odds API connection.")
-    else:
+    if not active_tournaments:
+        st.warning("No active tennis tournaments found in API-Odds. "
+                   "Tennis sport keys are tournament-specific and only active during events.")
+    elif not todays_matches:
+        st.info(f"Found {len(active_tournaments)} active tournaments but no matches "
+                f"in the next 36 hours. Could be a rest day between rounds.")
+
+    if todays_matches:
         st.markdown("<div class='section-header'>Today's Slate</div>", unsafe_allow_html=True)
 
         c1, c2, c3 = st.columns(3)
         with c1:
-            if oddsapi_data: st.success(f"Odds API: {len(oddsapi_data)} matches")
-            else: st.warning("Odds API unavailable")
+            st.success(f"Odds API: {len(todays_matches)} matches")
         with c2:
             if kalshi_lines: st.success(f"Kalshi: {len(kalshi_lines)} lines")
             else: st.warning(_kalshi_error or "Kalshi: no lines")
         with c3:
-            st.info(f"Elo ratings: {len(overall_elos)} players")
+            st.info(f"Elo: {len(overall_elos)} players")
+            if len(overall_elos) == 0:
+                st.caption("⚠️ No Elo data — predictions will be 50/50 until backfilled")
 
+        # Compute predictions ONCE per match, store in dict for both table + expanders
+        match_state = {}
         rows = []
         shadow_logged = 0
         today = today_et()
@@ -657,38 +700,45 @@ with tab1:
                 tour = m["tour"]
                 p1 = m["p1"]
                 p2 = m["p2"]
+                p1_disp = display_name(p1)
+                p2_disp = display_name(p2)
 
                 kalshi_data, _ = match_kalshi(tour, p1, p2, kalshi_lines)
-                surface = (kalshi_data["surface"] if kalshi_data
-                           else "Hard")  # default to Hard if Kalshi unknown
+                surface = (kalshi_data["surface"] if kalshi_data else m.get("surface", "Hard"))
 
-                p1_key = f"{tour}|{p1.title()}"
-                p2_key = f"{tour}|{p2.title()}"
-
-                model_p1_prob, detail = predict_match(p1_key, p2_key, surface,
+                model_p1_prob, detail = predict_match(tour, p1_disp, p2_disp, surface,
                                                       overall_elos, surface_elos)
                 conviction = calc_conviction(detail)
 
                 kalshi_p1_cents = kalshi_data["p1_yes_cents"] if kalshi_data else None
                 oddsapi_p1_implied = m["p1_implied"]
 
-                # Edges
                 if kalshi_p1_cents:
-                    p1_lean, edge_p1, p2_lean, edge_p2 = calc_signal(model_p1_prob, kalshi_p1_cents)
+                    edge_p1, edge_p2 = calc_signal(model_p1_prob, kalshi_p1_cents)
                 else:
                     edge_p1 = edge_p2 = 0
-                    p1_lean = p2_lean = "EVEN"
 
-                # Shadow log
-                if shadow_log_match(today, tour, p1.title(), p2.title(), surface,
+                match_state[(tour, p1, p2)] = {
+                    "model_p1_prob": model_p1_prob,
+                    "detail": detail,
+                    "conviction": conviction,
+                    "kalshi_data": kalshi_data,
+                    "kalshi_p1_cents": kalshi_p1_cents,
+                    "edge_p1": edge_p1,
+                    "edge_p2": edge_p2,
+                    "surface": surface,
+                    "p1_disp": p1_disp,
+                    "p2_disp": p2_disp,
+                }
+
+                if shadow_log_match(today, tour, p1_disp, p2_disp, surface,
                                     model_p1_prob, kalshi_p1_cents, oddsapi_p1_implied,
                                     conviction["tier"], conviction["score"],
                                     edge_p1, edge_p2):
                     shadow_logged += 1
 
-                # Pick best edge to surface in table
                 best_edge = max(edge_p1, edge_p2)
-                best_side = p1.title() if edge_p1 > edge_p2 else p2.title()
+                best_side = p1_disp if edge_p1 > edge_p2 else p2_disp
                 show_edge = fmt_edge(best_edge) if best_edge >= EDGE_MIN else "—"
                 if best_edge < EDGE_MIN:
                     sig = "—"
@@ -700,8 +750,8 @@ with tab1:
                 rows.append({
                     "Time": m.get("match_time_et", ""),
                     "Tour": tour,
-                    "Match": f"{p1.title()} vs {p2.title()}",
-                    "Surf": surface[:1],  # H/C/G
+                    "Match": f"{p1_disp} vs {p2_disp}",
+                    "Surf": surface[:1],
                     "Model": f"{model_p1_prob*100:.0f}%/{(1-model_p1_prob)*100:.0f}%",
                     "Kalshi": f"{kalshi_p1_cents}c" if kalshi_p1_cents else "—",
                     "Mkt": f"{int(oddsapi_p1_implied*100)}%",
@@ -710,7 +760,6 @@ with tab1:
                     "Conv": conviction["icon"],
                     "Sig": sig,
                 })
-
             except Exception as e:
                 st.warning(f"Could not process {m.get('p1','?')} vs {m.get('p2','?')}: {e}")
                 continue
@@ -729,33 +778,40 @@ with tab1:
                          use_container_width=True, hide_index=True)
             st.markdown("---")
 
-        # Per-match expanders
+        # Per-match expanders — REUSE match_state (no recomputation)
         for m in todays_matches:
             try:
+                key = (m["tour"], m["p1"], m["p2"])
+                state = match_state.get(key)
+                if not state: continue
+
                 tour = m["tour"]
-                p1 = m["p1"]
-                p2 = m["p2"]
-                kalshi_data, _ = match_kalshi(tour, p1, p2, kalshi_lines)
-                surface = kalshi_data["surface"] if kalshi_data else "Hard"
-                p1_key = f"{tour}|{p1.title()}"
-                p2_key = f"{tour}|{p2.title()}"
+                p1_disp = state["p1_disp"]
+                p2_disp = state["p2_disp"]
+                surface = state["surface"]
+                model_p1_prob = state["model_p1_prob"]
+                detail = state["detail"]
+                conviction = state["conviction"]
+                kalshi_data = state["kalshi_data"]
 
-                model_p1_prob, detail = predict_match(p1_key, p2_key, surface,
-                                                       overall_elos, surface_elos)
-                conviction = calc_conviction(detail)
-
-                with st.expander(f"**{tour}** {p1.title()} vs {p2.title()} — {m.get('match_time_et','')} ET ({surface})"):
+                with st.expander(f"**{tour}** {p1_disp} vs {p2_disp} — "
+                                 f"{m.get('match_time_et','')} ET ({surface}) — "
+                                 f"{m.get('tournament','')}"):
                     cA, cB, cC = st.columns(3)
                     with cA:
-                        st.metric(f"{p1.title()}", f"{model_p1_prob*100:.0f}%")
+                        st.metric(p1_disp, f"{model_p1_prob*100:.0f}%")
                         st.caption(f"Surface Elo: {detail['p1_elo_surface']:.0f}")
                         st.caption(f"Overall Elo: {detail['p1_elo_overall']:.0f}")
                     with cB:
-                        st.metric(f"{p2.title()}", f"{(1-model_p1_prob)*100:.0f}%")
+                        st.metric(p2_disp, f"{(1-model_p1_prob)*100:.0f}%")
                         st.caption(f"Surface Elo: {detail['p2_elo_surface']:.0f}")
                         st.caption(f"Overall Elo: {detail['p2_elo_overall']:.0f}")
                     with cC:
                         st.metric("Conviction", conviction["label"], f"{conviction['score']}/8")
+
+                    if not detail.get("elo_data_present"):
+                        st.warning("⚠️ One or both players have no Elo history yet — "
+                                   "prediction defaulted to 50/50. Backfill Sackmann data to fix.")
 
                     st.caption(f"Elo blend diff: {detail['elo_diff']:+.1f} | "
                                f"Form adj: {detail['form_adj']:+.1f} | "
@@ -779,12 +835,11 @@ with tab1:
                             st.metric("Kalshi", "—")
 
                     if kalshi_data:
-                        kalshi_p1_cents = kalshi_data["p1_yes_cents"]
-                        p1_lean, edge_p1, p2_lean, edge_p2 = calc_signal(model_p1_prob, kalshi_p1_cents)
-
+                        edge_p1 = state["edge_p1"]
+                        edge_p2 = state["edge_p2"]
                         for player_name, side_label, edge_val, yes_cents in [
-                            (p1.title(), "P1", edge_p1, kalshi_p1_cents),
-                            (p2.title(), "P2", edge_p2, kalshi_data["p2_yes_cents"]),
+                            (p1_disp, "P1", edge_p1, kalshi_data["p1_yes_cents"]),
+                            (p2_disp, "P2", edge_p2, kalshi_data["p2_yes_cents"]),
                         ]:
                             e_pct = round(edge_val * 100, 1)
                             decision, severity = betting_decision(abs(e_pct), conviction["tier"])
@@ -792,14 +847,14 @@ with tab1:
                             if decision.startswith("✅"):
                                 _, bet_amt = calc_kelly(edge_val)
                                 st.success(f"{label} | Kelly: ${bet_amt}")
-                                placed = st.checkbox(f"Placed on Kalshi", key=f"placed_{tour}_{p1}_{p2}_{side_label}")
+                                placed = st.checkbox(f"Placed on Kalshi", key=f"placed_{tour}_{m['p1']}_{m['p2']}_{side_label}")
                                 real_amt = None
                                 if placed:
                                     real_amt = st.number_input(f"Real $ amount", min_value=1.0, max_value=500.0,
                                         value=float(bet_amt), step=1.0,
-                                        key=f"real_{tour}_{p1}_{p2}_{side_label}")
-                                if st.button(f"Log {player_name}", key=f"log_{tour}_{p1}_{p2}_{side_label}"):
-                                    if save_bet(today, tour, p1.title(), p2.title(), surface,
+                                        key=f"real_{tour}_{m['p1']}_{m['p2']}_{side_label}")
+                                if st.button(f"Log {player_name}", key=f"log_{tour}_{m['p1']}_{m['p2']}_{side_label}"):
+                                    if save_bet(today, tour, p1_disp, p2_disp, surface,
                                                 model_p1_prob if side_label == "P1" else (1 - model_p1_prob),
                                                 yes_cents, edge_val, side_label, bet_amt,
                                                 conviction["tier"], conviction["score"],
@@ -869,8 +924,6 @@ with tab3:
                     st.info(f"Need 10+ settled matches for calibration (have {len(settled)}).")
                 else:
                     st.markdown(f"**{len(settled)} settled matches**")
-
-                    # Calibration: bucket model_p1_prob, compare to actual win rates
                     settled = settled.copy()
                     settled["p1_won"] = (settled["winner_name"] == settled["player1"]).astype(int)
                     bins = [(0.50, 0.55), (0.55, 0.60), (0.60, 0.65), (0.65, 0.70),
@@ -886,10 +939,9 @@ with tab3:
                                 "Actual": f"{sub['p1_won'].mean()*100:.1f}%",
                             })
                     if cal_rows:
-                        st.markdown("**Calibration table** (when model says X%, does P1 actually win X%?)")
+                        st.markdown("**Calibration table**")
                         st.dataframe(pd.DataFrame(cal_rows), use_container_width=True, hide_index=True)
 
-                    # By conviction tier
                     if "conviction_tier" in settled.columns:
                         st.markdown("---")
                         st.markdown("**By conviction tier**")
@@ -897,7 +949,6 @@ with tab3:
                         for tier in ["HIGH", "MED", "LOW"]:
                             sub = settled[settled["conviction_tier"] == tier]
                             if len(sub) > 0:
-                                # Did model pick the eventual winner?
                                 sub = sub.copy()
                                 sub["model_correct"] = ((sub["model_p1_prob"] >= 0.5) == (sub["p1_won"] == 1)).astype(int)
                                 tier_rows.append({
@@ -914,7 +965,7 @@ with tab3:
 with tab4:
     st.markdown("**Shadow Validation — All Matches Auto-Logged**")
     st.caption("Every match auto-logs with conviction tier. Once matches settle, "
-               "the winner gets recorded and we can compare model probability to actual outcome.")
+               "the winner gets recorded and we compare model probability to actual outcome.")
     st.markdown("---")
 
     if supabase_connected:
@@ -954,21 +1005,6 @@ WHERE winner_name IS NOT NULL
 GROUP BY conviction_tier
 ORDER BY conviction_tier;""", language="sql")
 
-                st.code("""-- Edge bucket performance (when we had Kalshi line)
-SELECT
-  CASE
-    WHEN ABS(GREATEST(COALESCE(edge_p1,0), COALESCE(edge_p2,0))) < 0.05 THEN '1. Under 5%'
-    WHEN ABS(GREATEST(COALESCE(edge_p1,0), COALESCE(edge_p2,0))) < 0.12 THEN '2. 5-12%'
-    ELSE '3. 12%+'
-  END AS edge_bucket,
-  conviction_tier,
-  COUNT(*) AS matches
-FROM tennis_shadow_validation
-WHERE winner_name IS NOT NULL AND kalshi_p1_cents IS NOT NULL
-GROUP BY edge_bucket, conviction_tier
-ORDER BY edge_bucket, conviction_tier;""", language="sql")
-
-                st.markdown("---")
                 st.markdown("**Recent Shadow Rows**")
                 cols = [c for c in ["match_date", "tour", "player1", "player2", "surface",
                                      "model_p1_prob", "kalshi_p1_cents", "conviction_tier",
