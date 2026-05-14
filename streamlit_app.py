@@ -77,6 +77,20 @@ details[open] { border-color: #00ff8855 !important; box-shadow: 0 4px 20px #00ff
 .stButton > button { background: linear-gradient(135deg, #0d2d1a, #0a2214) !important; border: 1px solid #00ff8844 !important; color: #00ff88 !important; border-radius: 8px !important; font-weight: 700 !important; font-size: 0.82rem !important; width: 100% !important; transition: all 0.2s !important; letter-spacing: 0.5px; }
 .stButton > button:hover { background: linear-gradient(135deg, #00ff8818, #00d4ff11) !important; border-color: #00ff88 !important; box-shadow: 0 4px 16px #00ff8822 !important; }
 .stDataFrame { border-radius: 10px !important; border: 1px solid #1a5030 !important; overflow: hidden !important; box-shadow: 0 4px 24px #00000044 !important; }
+.stDataFrame > div { background-color: #0a1a12 !important; }
+.stDataFrame [data-testid="stTable"] { background-color: #0a1a12 !important; }
+.stDataFrame table { background-color: #0a1a12 !important; color: #c8f0d8 !important; }
+.stDataFrame thead tr th { background-color: #0d3c1f !important; color: #00ff88 !important; border-bottom: 1px solid #1a5030 !important; font-weight: 700 !important; }
+.stDataFrame tbody tr td { background-color: #0a1a12 !important; color: #c8f0d8 !important; border-bottom: 1px solid #1a503044 !important; }
+.stDataFrame tbody tr:hover td { background-color: #0d3c1f !important; }
+.stDataFrame [data-testid="stDataFrameResizable"] { background-color: #0a1a12 !important; }
+div[data-testid="stDataFrameContainer"] { background-color: #0a1a12 !important; }
+div[data-testid="stDataFrameContainer"] table { background-color: #0a1a12 !important; color: #c8f0d8 !important; }
+div[data-testid="stDataFrameContainer"] th { background-color: #0d3c1f !important; color: #00ff88 !important; }
+div[data-testid="stDataFrameContainer"] td { background-color: #0a1a12 !important; color: #c8f0d8 !important; }
+div[data-testid="stDataFrameResizable"] > div { background-color: #0a1a12 !important; }
+.glide-data-grid-cell { background-color: #0a1a12 !important; color: #c8f0d8 !important; }
+canvas { background-color: #0a1a12 !important; }
 section[data-testid="stSidebar"] { background: linear-gradient(180deg, #080c18, #05080f) !important; border-right: 1px solid #1a5030 !important; }
 .stTabs [data-baseweb="tab-list"] { background: #0d2d1a !important; border-radius: 10px !important; padding: 4px !important; gap: 4px !important; border: 1px solid #1a5030 !important; }
 .stTabs [data-baseweb="tab"] { color: #3a7050 !important; font-weight: 700 !important; border-radius: 8px !important; font-size: 0.82rem !important; letter-spacing: 0.5px; }
@@ -92,7 +106,7 @@ st.markdown(f"""
     <div class="mph-sub">Surface Elo + Form + H2H + Shadow Validation &nbsp;<span class="pill-live">&#9679; LIVE</span></div>
   </div>
   <div style="text-align:right">
-    <div class="mph-badge">V1.2</div>
+    <div class="mph-badge">V1.3</div>
     <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y &middot; %-I:%M %p ET')}</div>
   </div>
 </div>
@@ -658,7 +672,7 @@ with st.sidebar:
         for t in active_tournaments:
             st.caption(f"• {t['title']} ({t['surface']})")
     st.markdown("---")
-    st.markdown("### V1.2 Betting Rules")
+    st.markdown("### V1.3 Betting Rules")
     st.markdown(f"✅ BET: edge **{int(EDGE_MIN*100)}–{int(EDGE_MAX*100)}%** + 🔵/🟡 conviction")
     st.markdown(f"❌ SKIP: edge **>{int(EDGE_MAX*100)}%** (unreliable)")
     st.markdown("❌ SKIP: ⚪ LOW conviction")
