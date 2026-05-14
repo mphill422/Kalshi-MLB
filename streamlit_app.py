@@ -92,7 +92,7 @@ st.markdown(f"""
     <div class="mph-sub">Surface Elo + Form + H2H + Shadow Validation &nbsp;<span class="pill-live">&#9679; LIVE</span></div>
   </div>
   <div style="text-align:right">
-    <div class="mph-badge">V1.1</div>
+    <div class="mph-badge">V1.2</div>
     <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y &middot; %-I:%M %p ET')}</div>
   </div>
 </div>
@@ -343,13 +343,19 @@ def calc_conviction(detail):
 # ─── KALSHI LINES ──────────────────────────────────────────────────────────
 @st.cache_data(ttl=60)
 def fetch_kalshi_tennis_lines():
-    """Loads tennis match lines from Supabase (populated by Edge Function)."""
+    """Loads tennis match lines from Supabase (populated by Edge Function).
+    Pulls today's and tomorrow's matches (36-hour window) to match the
+    API-Odds match window."""
     if not supabase_connected:
         return {"**error**": "Supabase not connected"}
     try:
         today = today_et()
+        tomorrow_dt = datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)
+        tomorrow = tomorrow_dt.strftime("%Y-%m-%d")
         rows = (supabase.table("tennis_kalshi_lines")
-                .select("*").eq("match_date", today).execute().data or [])
+                .select("*")
+                .in_("match_date", [today, tomorrow])
+                .execute().data or [])
         result = {}
         for row in rows:
             tour = (row.get("tour") or "ATP").upper()
@@ -366,7 +372,7 @@ def fetch_kalshi_tennis_lines():
                 "match_time": row.get("match_time", ""),
             }
         if not result:
-            return {"**error**": f"No lines for {today}"}
+            return {"**error**": f"No lines for {today} or {tomorrow}"}
         return result
     except Exception as e:
         return {"**error**": str(e)}
@@ -652,7 +658,7 @@ with st.sidebar:
         for t in active_tournaments:
             st.caption(f"• {t['title']} ({t['surface']})")
     st.markdown("---")
-    st.markdown("### V1.1 Betting Rules")
+    st.markdown("### V1.2 Betting Rules")
     st.markdown(f"✅ BET: edge **{int(EDGE_MIN*100)}–{int(EDGE_MAX*100)}%** + 🔵/🟡 conviction")
     st.markdown(f"❌ SKIP: edge **>{int(EDGE_MAX*100)}%** (unreliable)")
     st.markdown("❌ SKIP: ⚪ LOW conviction")
