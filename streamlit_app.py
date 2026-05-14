@@ -96,6 +96,15 @@ section[data-testid="stSidebar"] { background: linear-gradient(180deg, #080c18, 
 .stTabs [data-baseweb="tab"] { color: #3a7050 !important; font-weight: 700 !important; border-radius: 8px !important; font-size: 0.82rem !important; letter-spacing: 0.5px; }
 .stTabs [aria-selected="true"] { background: linear-gradient(135deg, #00ff8822, #00d4ff22) !important; color: #00ff88 !important; border: 1px solid #00ff8833 !important; }
 @media (max-width: 768px) { .mph-title { font-size: 1.1rem !important; } div[data-testid="metric-container"] { padding: 8px 10px !important; } div[data-testid="metric-container"] div[data-testid="stMetricValue"] { font-size: 1.1rem !important; } .stDataFrame { font-size: 0.7rem !important; } details summary { font-size: 0.82rem !important; padding: 10px 14px !important; } }
+
+.mph-table { width: 100% !important; border-collapse: collapse !important; background-color: #0a1a12 !important; color: #c8f0d8 !important; font-family: 'Inter', sans-serif !important; font-size: 0.85rem !important; border-radius: 10px !important; overflow: hidden !important; border: 1px solid #1a5030 !important; margin: 8px 0 !important; }
+.mph-table thead { background: linear-gradient(135deg, #0d3c1f, #0a2818) !important; }
+.mph-table thead th { background: transparent !important; color: #00ff88 !important; font-weight: 700 !important; font-size: 0.7rem !important; letter-spacing: 1.5px !important; text-transform: uppercase !important; padding: 10px 12px !important; text-align: center !important; border-bottom: 1px solid #00ff8833 !important; }
+.mph-table tbody tr { background-color: #0a1a12 !important; transition: background 0.15s; }
+.mph-table tbody tr:nth-child(even) { background-color: #0d2218 !important; }
+.mph-table tbody tr:hover { background-color: #0d3c1f !important; }
+.mph-table tbody td { color: #c8f0d8 !important; padding: 8px 12px !important; text-align: center !important; border: none !important; border-bottom: 1px solid #1a503044 !important; font-size: 0.82rem !important; }
+@media (max-width: 768px) { .mph-table { font-size: 0.72rem !important; } .mph-table thead th { padding: 6px 4px !important; font-size: 0.6rem !important; } .mph-table tbody td { padding: 6px 4px !important; font-size: 0.7rem !important; } }
 </style>
 """, unsafe_allow_html=True)
 
@@ -106,7 +115,7 @@ st.markdown(f"""
     <div class="mph-sub">Surface Elo + Form + H2H + Shadow Validation &nbsp;<span class="pill-live">&#9679; LIVE</span></div>
   </div>
   <div style="text-align:right">
-    <div class="mph-badge">V1.3</div>
+    <div class="mph-badge">V1.4</div>
     <div class="mph-sub" style="margin-top:4px">{now_et().strftime('%b %d, %Y &middot; %-I:%M %p ET')}</div>
   </div>
 </div>
@@ -672,7 +681,7 @@ with st.sidebar:
         for t in active_tournaments:
             st.caption(f"• {t['title']} ({t['surface']})")
     st.markdown("---")
-    st.markdown("### V1.3 Betting Rules")
+    st.markdown("### V1.4 Betting Rules")
     st.markdown(f"✅ BET: edge **{int(EDGE_MIN*100)}–{int(EDGE_MAX*100)}%** + 🔵/🟡 conviction")
     st.markdown(f"❌ SKIP: edge **>{int(EDGE_MAX*100)}%** (unreliable)")
     st.markdown("❌ SKIP: ⚪ LOW conviction")
@@ -794,8 +803,8 @@ with tab1:
                 cols = ["Time", "Match", "Surf", "Model", "Kalshi", "Edge", "Conv", "Sig"]
             else:
                 cols = ["Time", "Tour", "Match", "Surf", "Model", "Kalshi", "Mkt", "Best", "Edge", "Conv", "Sig"]
-            st.dataframe(df_all[cols].style.set_properties(**{'text-align': 'center'}),
-                         use_container_width=True, hide_index=True)
+            # Use st.table for proper dark theme rendering (st.dataframe uses canvas-based grid that ignores CSS)
+            st.markdown(df_all[cols].to_html(index=False, classes='mph-table', escape=False), unsafe_allow_html=True)
             st.markdown("---")
 
         # Per-match expanders — REUSE match_state (no recomputation)
@@ -922,7 +931,7 @@ with tab2:
                                      "model_prob", "kalshi_cents", "bet_side", "edge",
                                      "bet_amount", "conviction_tier", "result", "profit_loss"]
                         if c in df_s.columns]
-                st.dataframe(df_s[cols], use_container_width=True, hide_index=True)
+                st.markdown(df_s[cols].to_html(index=False, classes='mph-table', escape=False), unsafe_allow_html=True)
             else:
                 st.info("No bets logged yet.")
         except Exception as e:
@@ -960,7 +969,7 @@ with tab3:
                             })
                     if cal_rows:
                         st.markdown("**Calibration table**")
-                        st.dataframe(pd.DataFrame(cal_rows), use_container_width=True, hide_index=True)
+                        st.markdown(pd.DataFrame(cal_rows).to_html(index=False, classes='mph-table', escape=False), unsafe_allow_html=True)
 
                     if "conviction_tier" in settled.columns:
                         st.markdown("---")
@@ -976,7 +985,7 @@ with tab3:
                                     "Pick Accuracy": f"{sub['model_correct'].mean()*100:.1f}%",
                                 })
                         if tier_rows:
-                            st.dataframe(pd.DataFrame(tier_rows), use_container_width=True, hide_index=True)
+                            st.markdown(pd.DataFrame(tier_rows).to_html(index=False, classes='mph-table', escape=False), unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Calibration error: {e}")
     else:
@@ -1030,7 +1039,7 @@ ORDER BY conviction_tier;""", language="sql")
                                      "model_p1_prob", "kalshi_p1_cents", "conviction_tier",
                                      "conviction_score", "edge_p1", "edge_p2", "winner_name"]
                         if c in df_sv.columns]
-                st.dataframe(df_sv[cols].head(40), use_container_width=True, hide_index=True)
+                st.markdown(df_sv[cols].head(40).to_html(index=False, classes='mph-table', escape=False), unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Shadow validation error: {e}")
     else:
